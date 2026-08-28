@@ -81,6 +81,24 @@ agent_status_pid_on_tty() {
     awk -v wanted="$1" '$1 == wanted { found=1 } END { exit !found }'
 }
 
+agent_status_pending_working() {
+  local pane_number="${1#%}" agent="$2" marker found=0
+  case "$pane_number" in ''|*[!0-9]*) return 1 ;; esac
+  case "$agent" in ''|.|..|*/*) return 1 ;; esac
+  for marker in "$(agent_status_report_root)/$pane_number/$agent"/pending-working.*; do
+    [ -f "$marker" ] || continue
+    printf '%s\n' "${marker##*.}"
+    found=1
+  done
+  [ "$found" = 1 ]
+}
+
+agent_status_consume_working() {
+  local pane_number="${1#%}" agent="$2" transition="$3"
+  case "$transition" in ''|*[!0-9]*) return 1 ;; esac
+  rm -f "$(agent_status_report_root)/$pane_number/$agent/pending-working.$transition"
+}
+
 # reported_state <pane_id> <agent> <pane_tty> -> working | blocked | waiting
 #
 # Reports are data, not shell input. Accept exactly one of each version-1 field
@@ -92,7 +110,7 @@ reported_state() {
 
   pane_number="${pane_id#%}"
   case "$pane_number" in ''|*[!0-9]*) return 1 ;; esac
-  case "$agent" in ''|*/*) return 1 ;; esac
+  case "$agent" in ''|.|..|*/*) return 1 ;; esac
   report="$(agent_status_report_root)/$pane_number/$agent/report"
   [ -f "$report" ] || return 1
 

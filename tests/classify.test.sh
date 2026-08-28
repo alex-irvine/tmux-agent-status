@@ -119,8 +119,12 @@ printf 'state=blocked\n' >>"$TMUX_AGENT_STATUS_DIR/9/opencode/report"
 assert_rejected 'rejects a duplicate key' reported_state %9 opencode /dev/pts/9
 
 write_report opencode %9 123 working
-printf 'version=2\nsource=opencode\nrun=test-run\nowner=123\npane=%%9\n' >"$TMUX_AGENT_STATUS_DIR/9/opencode/report"
+printf 'version=1\nsource=opencode\nrun=test-run\nowner=123\npane=%%9\n' >"$TMUX_AGENT_STATUS_DIR/9/opencode/report"
 assert_rejected 'rejects a missing key' reported_state %9 opencode /dev/pts/9
+
+write_report opencode %9 123 working
+printf 'extra=value\n' >>"$TMUX_AGENT_STATUS_DIR/9/opencode/report"
+assert_rejected 'rejects an extra key' reported_state %9 opencode /dev/pts/9
 
 write_report opencode %9 123 working
 printf 'version=2\nsource=opencode\nrun=test-run\nowner=123\npane=%%9\nstate=working\n' >"$TMUX_AGENT_STATUS_DIR/9/opencode/report"
@@ -132,6 +136,20 @@ assert_rejected 'rejects a nonnumeric owner' reported_state %9 opencode /dev/pts
 remove_reports
 assert_rejected 'rejects a missing report' reported_state %9 claude /dev/pts/9
 assert_state 'preserves Claude screen fallback without a report' working classify_state %9 claude /dev/pts/9
+
+mkdir -p "$TMUX_AGENT_STATUS_DIR/9"
+printf 'version=1\nsource=.\nrun=test-run\nowner=123\npane=%%9\nstate=working\n' >"$TMUX_AGENT_STATUS_DIR/9/report"
+assert_rejected 'rejects dot as a source path' reported_state %9 . /dev/pts/9
+assert_rejected 'rejects dot-dot as a source path' reported_state %9 .. /dev/pts/9
+
+write_report opencode %9 123 working
+: >"$TMUX_AGENT_STATUS_DIR/9/opencode/pending-working.2"
+agent_status_consume_working %9 opencode 1
+if [ -e "$TMUX_AGENT_STATUS_DIR/9/opencode/pending-working.2" ]; then
+  pass 'an old refresh cannot consume a replacement working edge'
+else
+  fail 'an old refresh consumed a replacement working edge'
+fi
 
 if [ "$failures" -ne 0 ]; then
   printf '%d of %d tests failed\n' "$failures" "$tests" >&2

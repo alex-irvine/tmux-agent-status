@@ -23,24 +23,55 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tmux-agent-status"
 CACHE="$CACHE_DIR/state"
 NEW="$CACHE.new"
 LOCKDIR="$CACHE_DIR/refresh.lock"
+CONSUMED="$CACHE_DIR/consumed.$$"
 mkdir -p "$CACHE_DIR"
 
-# --- Serialize: only one refresh at a time (binding vs daemon) ---------------
-if ! mkdir "$LOCKDIR" 2>/dev/null; then
-  oldpid="$(cat "$LOCKDIR/pid" 2>/dev/null)"
-  if [ -n "$oldpid" ] && kill -0 "$oldpid" 2>/dev/null; then
-    exit 0                                  # another refresh is running
+# --- Serialize: wait for daemon/event overlap so lifecycle edges are scanned --
+cleanup_refresh_lock() {
+  rm -f "$CONSUMED"
+  if [ "$(cat "$LOCKDIR/pid" 2>/dev/null)" = "$$" ]; then
+    rm -rf "$LOCKDIR"
   fi
-  rm -rf "$LOCKDIR"; mkdir "$LOCKDIR" 2>/dev/null || exit 0   # steal stale lock
-fi
-echo $$ > "$LOCKDIR/pid"
-trap 'rm -rf "$LOCKDIR"' EXIT
+}
+acquire_refresh_lock() {
+  local attempt=0 oldpid stale="$LOCKDIR.stale.$$"
+  while ! mkdir "$LOCKDIR" 2>/dev/null; do
+    oldpid="$(cat "$LOCKDIR/pid" 2>/dev/null)"
+    case "$oldpid" in
+      ''|0|*[!0-9]*)
+        if [ "$attempt" -ge 5 ]; then
+          rm -rf "$stale"
+          mv "$LOCKDIR" "$stale" 2>/dev/null && rm -rf "$stale"
+          continue
+        fi
+        ;;
+      *)
+        if ! kill -0 "$oldpid" 2>/dev/null; then
+          rm -rf "$stale"
+          mv "$LOCKDIR" "$stale" 2>/dev/null && rm -rf "$stale"
+          continue
+        fi
+        ;;
+    esac
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt 200 ] || return 1
+    sleep 0.01
+  done
+  printf '%s\n' "$$" >"$LOCKDIR/pid" || {
+    rmdir "$LOCKDIR" 2>/dev/null
+    return 1
+  }
+}
+acquire_refresh_lock || exit 1
+trap cleanup_refresh_lock EXIT
+trap 'exit 1' INT TERM
 
 # Cold start (no prior cache) → don't notify, or we'd alert for every existing
 # blocked/done agent the moment the daemon launches.
 NO_NOTIFY=0
 [ -f "$CACHE" ] || NO_NOTIFY=1
 : > "$NEW"
+: > "$CONSUMED"
 
 GLOBAL_ICON="$(tmux_opt @agent_status_icon 🤖)"
 RENAME="$(tmux_opt @agent_status_rename off)"
@@ -169,9 +200,17 @@ while read -r window_id window_active session_attached session_name window_index
 
     praw="$(prev_raw "$pane_id")"
     pdisp="$(prev_disp "$pane_id")"
+    pending_working="$(agent_status_pending_working "$pane_id" "$agent")" || pending_working=
     raw="$(classify_state "$pane_id" "$agent" "$pane_tty")"
+    if [ -n "$pending_working" ] && [ "$raw" = waiting ]; then
+      praw=working
+      pdisp=working
+    fi
     disp="$(display_state "$raw" "$pdisp" "$seen")"
     printf '%s %s %s\n' "$pane_id" "$disp" "$raw" >> "$NEW"
+    for transition in $pending_working; do
+      printf '%s %s %s\n' "$pane_id" "$agent" "$transition" >>"$CONSUMED"
+    done
 
     # Notify on the raw transition — independent of which window you're viewing.
     if [ "$NO_NOTIFY" = 0 ]; then
@@ -214,4 +253,9 @@ while read -r window_id window_active session_attached session_name window_index
   fi
 done
 
-mv -f "$NEW" "$CACHE" 2>/dev/null || true
+if mv -f "$NEW" "$CACHE" 2>/dev/null; then
+  while read -r pane_id agent transition; do
+    [ -n "$pane_id" ] || continue
+    agent_status_consume_working "$pane_id" "$agent" "$transition"
+  done <"$CONSUMED"
+fi
