@@ -81,12 +81,19 @@ agent_status_pid_on_tty() {
     awk -v wanted="$1" '$1 == wanted { found=1 } END { exit !found }'
 }
 
+agent_status_encode() {
+  printf '%s' "$1" | LC_ALL=C od -An -v -tx1 | tr -d '[:space:]'
+}
+
 agent_status_pending_working() {
-  local pane_number="${1#%}" agent="$2" marker found=0
+  local pane_number="${1#%}" agent="$2" run_token="$3" marker marker_run found=0
   case "$pane_number" in ''|*[!0-9]*) return 1 ;; esac
   case "$agent" in ''|.|..|*/*) return 1 ;; esac
+  case "$run_token" in ''|*[!0-9a-f]*) return 1 ;; esac
   for marker in "$(agent_status_report_root)/$pane_number/.edges/$agent"/pending-working.*; do
     [ -f "$marker" ] || continue
+    marker_run="$(cat "$marker" 2>/dev/null)"
+    [ "$marker_run" = "$run_token" ] || continue
     printf '%s\n' "${marker##*.}"
     found=1
   done
@@ -94,16 +101,19 @@ agent_status_pending_working() {
 }
 
 agent_status_consume_working() {
-  local pane_number="${1#%}" agent="$2" transition="$3"
+  local pane_number="${1#%}" agent="$2" run_token="$3" transition="$4" marker marker_run
   case "$transition" in ''|*[!0-9]*) return 1 ;; esac
-  rm -f "$(agent_status_report_root)/$pane_number/.edges/$agent/pending-working.$transition"
+  marker="$(agent_status_report_root)/$pane_number/.edges/$agent/pending-working.$transition"
+  marker_run="$(cat "$marker" 2>/dev/null)"
+  [ "$marker_run" = "$run_token" ] || return 0
+  rm -f "$marker"
 }
 
-# reported_state <pane_id> <agent> <pane_tty> -> working | blocked | waiting
+# reported_status <pane_id> <agent> <pane_tty> -> "<state> <run-token>"
 #
 # Reports are data, not shell input. Accept exactly one of each version-1 field
 # and validate that its owner is still running on the pane's tty.
-reported_state() {
+reported_status() {
   local pane_id="$1" agent="$2" pane_tty="$3"
   local pane_number report line key value seen=" "
   local version= source= run= owner= pane= state=
@@ -144,10 +154,16 @@ reported_state() {
   case "$state" in working|blocked|waiting) ;; *) return 1 ;; esac
   agent_status_pid_alive "$owner" || return 1
   agent_status_pid_on_tty "$owner" "$pane_tty" || return 1
-  printf '%s\n' "$state"
+  printf '%s %s\n' "$state" "$(agent_status_encode "$run")"
 }
 
-# classify_state <pane_id> <agent> <pane_tty> -> working | blocked | waiting | unknown
+reported_state() {
+  local status
+  status="$(reported_status "$@")" || return 1
+  printf '%s\n' "${status%% *}"
+}
+
+# classify_status <pane_id> <agent> <pane_tty> -> "<state> <run-token>"
 #
 # Reads the pane's visible screen and matches the agent's TUI. We only have
 # reliable markers for Claude Code today; other agents return "unknown" (the
@@ -157,23 +173,29 @@ reported_state() {
 #              (note: a *completed* "✻ Brewed for 20m 22s" line has no "… (" timer)
 #   blocked  — a numbered selection menu "❯ 1. Yes" (permission / plan prompts)
 #   waiting  — agent is at its prompt, nothing running and nothing to approve
-classify_state() {
+classify_status() {
   local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported
-  if reported="$(reported_state "$pane_id" "$agent" "$pane_tty")"; then
+  if reported="$(reported_status "$pane_id" "$agent" "$pane_tty")"; then
     echo "$reported"
     return
   fi
   case "$agent" in
     claude) ;;                       # supported below
-    *) echo unknown; return ;;       # no heuristics for this agent yet
+    *) echo 'unknown -'; return ;;   # no heuristics for this agent yet
   esac
   buf="$(tmux capture-pane -p -t "$pane_id" 2>/dev/null)"
-  [ -n "$buf" ] || { echo unknown; return; }
+  [ -n "$buf" ] || { echo 'unknown -'; return; }
   if printf '%s\n' "$buf" | grep -qE 'esc to interrupt|…[[:space:]]*\([0-9]'; then
-    echo working; return
+    echo 'working -'; return
   fi
   if printf '%s\n' "$buf" | grep -qE '❯[[:space:]]+[0-9]+\.'; then
-    echo blocked; return
+    echo 'blocked -'; return
   fi
-  echo waiting
+  echo 'waiting -'
+}
+
+classify_state() {
+  local status
+  status="$(classify_status "$@")"
+  printf '%s\n' "${status%% *}"
 }

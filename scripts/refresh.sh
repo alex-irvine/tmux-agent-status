@@ -140,9 +140,10 @@ notify() { # notify <title> <message>
   fi
 }
 
-# Cache columns: "<pane_id> <display_state> <raw_state>"
+# Cache columns: "<pane_id> <display_state> <raw_state> <run-token>"
 prev_disp() { [ -f "$CACHE" ] && awk -v p="$1" '$1==p {print $2; exit}' "$CACHE"; }
 prev_raw()  { [ -f "$CACHE" ] && awk -v p="$1" '$1==p {print $3; exit}' "$CACHE"; }
+prev_run()  { [ -f "$CACHE" ] && awk -v p="$1" '$1==p {print $4; exit}' "$CACHE"; }
 
 # display_state <raw> <prev_disp> <seen>   (seen = window visible on an attached client)
 display_state() {
@@ -211,16 +212,23 @@ while read -r window_id window_active session_attached session_name window_index
 
     praw="$(prev_raw "$pane_id")"
     pdisp="$(prev_disp "$pane_id")"
-    pending_working="$(agent_status_pending_working "$pane_id" "$agent")" || pending_working=
-    raw="$(classify_state "$pane_id" "$agent" "$pane_tty")"
+    previous_run="$(prev_run "$pane_id")"
+    status="$(classify_status "$pane_id" "$agent" "$pane_tty")"
+    raw="${status%% *}"
+    run_token="${status#* }"
+    if [ "$previous_run" != "$run_token" ]; then
+      praw=
+      pdisp=
+    fi
+    pending_working="$(agent_status_pending_working "$pane_id" "$agent" "$run_token")" || pending_working=
     if [ -n "$pending_working" ] && [ "$raw" = waiting ]; then
       praw=working
       pdisp=working
     fi
     disp="$(display_state "$raw" "$pdisp" "$seen")"
-    printf '%s %s %s\n' "$pane_id" "$disp" "$raw" >> "$NEW"
+    printf '%s %s %s %s\n' "$pane_id" "$disp" "$raw" "$run_token" >> "$NEW"
     for transition in $pending_working; do
-      printf '%s %s %s\n' "$pane_id" "$agent" "$transition" >>"$CONSUMED"
+      printf '%s %s %s %s\n' "$pane_id" "$agent" "$run_token" "$transition" >>"$CONSUMED"
     done
 
     # Notify on the raw transition — independent of which window you're viewing.
@@ -265,8 +273,8 @@ while read -r window_id window_active session_attached session_name window_index
 done
 
 if mv -f "$NEW" "$CACHE" 2>/dev/null; then
-  while read -r pane_id agent transition; do
+  while read -r pane_id agent run_token transition; do
     [ -n "$pane_id" ] || continue
-    agent_status_consume_working "$pane_id" "$agent" "$transition"
+    agent_status_consume_working "$pane_id" "$agent" "$run_token" "$transition"
   done <"$CONSUMED"
 fi

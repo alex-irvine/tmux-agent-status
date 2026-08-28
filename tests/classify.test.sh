@@ -144,19 +144,25 @@ assert_rejected 'rejects dot-dot as a source path' reported_state %9 .. /dev/pts
 
 write_report opencode %9 123 working
 mkdir -p "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode"
-: >"$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.1"
-old_transition="$(agent_status_pending_working %9 opencode)"
+printf '%s\n' 72756e2d61 >"$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.1"
+old_transition="$(agent_status_pending_working %9 opencode 72756e2d61)"
 if [ "$old_transition" != 1 ]; then
-  fail 'reads durable working edges outside the recreated run directory'
+  fail 'reads durable working edges for the reporting run'
 else
-  rm -f "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.1"
-  : >"$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.2"
-  agent_status_consume_working %9 opencode "$old_transition"
+  printf '%s\n' 72756e2d62 >"$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.2"
+  agent_status_consume_working %9 opencode 72756e2d61 "$old_transition"
   if [ -e "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.2" ]; then
     pass 'an old refresh cannot acknowledge a restarted run working edge'
   else
     fail 'an old refresh acknowledged a restarted run working edge'
   fi
+fi
+
+if agent_status_pending_working %9 opencode 72756e2d62 | grep -qx 2 &&
+   ! agent_status_pending_working %9 opencode 72756e2d61 | grep -q .; then
+  pass 'pending working edges are scoped to the reporting run'
+else
+  fail 'pending working edges leaked across reporting runs'
 fi
 
 if [ "$failures" -ne 0 ]; then

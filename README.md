@@ -128,6 +128,48 @@ precedence over screen markers. If the report is absent or invalid, detection
 preserves the existing Claude screen fallback and presence-only behavior for
 other agents.
 
+Working-transition markers live at
+`${TMUX_AGENT_STATUS_DIR}/<pane-number>/.edges/<source>/pending-working.<generation>`.
+Each marker and each cache row carries the encoded reporting run identity. A
+new run clears older pending markers without resetting the monotonic generation
+counter, and cached transition history is ignored when its run differs from the
+current report. A refresh acknowledges only an exact generation/run marker and
+only after replacing the cache successfully, so a crashed or delayed old run
+cannot make a reused pane display an inherited `done` state.
+
+### Lock and stale-state recovery
+
+The default runtime report root is
+`${XDG_RUNTIME_DIR:-/tmp}/tmux-agent-status-<uid>`. Reports are at
+`<root>/<pane-number>/<source>/report`, edge data is under
+`<root>/<pane-number>/.edges/<source>/`, and reporter locks are
+`<root>/<pane-number>/<source>.lock`. The refresh cache and lock are
+`${XDG_CACHE_HOME:-$HOME/.cache}/tmux-agent-status/state` and
+`${XDG_CACHE_HOME:-$HOME/.cache}/tmux-agent-status/refresh.lock`.
+
+Locks contain a unique `owner.<pid>...` file. A contender reclaims a lock only
+when that exact numeric PID is dead. Ownerless locks and locks with invalid owner
+tokens deliberately fail closed; they are never reclaimed based on age because
+doing so could admit two writers.
+
+For diagnosis, list the exact lock directory and check the PID from
+`owner.<pid>...` (or a legacy `pid` file):
+
+```sh
+ls -la /exact/path/to/refresh.lock
+ps -p <pid> -o pid=,command=
+```
+
+Recover manually only after stopping the affected lifecycle integration and
+poller and confirming that no `tmux-agent-report` or `scripts/refresh.sh`
+process is active. For an ownerless empty lock, run `rmdir` on that exact lock
+directory. For an invalid owner file, remove only the observed owner file and
+then run `rmdir` on the empty lock directory. Never use `rm -rf`, never remove a
+lock owned by a live PID, and never use lock age as evidence. Stale reports are
+normally ignored automatically; after confirming their `owner=` PID is dead,
+you may remove only the exact `report` file. The next integration `start`
+replaces run state and clears prior pending edges.
+
 ## Requirements
 
 - tmux 3.x, bash, `ps` (standard on macOS/Linux).

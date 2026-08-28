@@ -51,7 +51,13 @@ EOF
 cat >"$TMP/bin/mv" <<'EOF'
 #!/bin/sh
 case "$*" in
-  *state.new*) [ -n "${TMUX_AGENT_FAIL_CACHE_COMMIT:-}" ] && exit 1 ;;
+  *state.new*)
+    [ -n "${TMUX_AGENT_FAIL_CACHE_COMMIT:-}" ] && exit 1
+    if [ -n "${TMUX_AGENT_PAUSE_CACHE_COMMIT:-}" ]; then
+      : >"$TMUX_AGENT_PAUSE_CACHE_COMMIT/ready"
+      while [ ! -e "$TMUX_AGENT_PAUSE_CACHE_COMMIT/release" ]; do sleep 0.01; done
+    fi
+    ;;
 esac
 exec /bin/mv "$@"
 EOF
@@ -89,12 +95,16 @@ chmod +x "$TMP/bin/tmux" "$TMP/bin/ps" "$TMP/bin/mv" "$TMP/bin/rm" "$TMP/bin/mkd
 export PATH="$TMP/bin:$PATH"
 export TMUX_AGENT_TEST_OWNER="$$"
 
+run_token() {
+  printf '%s' "$1" | LC_ALL=C od -An -v -tx1 | tr -d '[:space:]'
+}
+
 write_report() {
-  pane="$1" state="$2"
+  pane="$1" state="$2" run="${3:-test-run}"
   dir="$TMUX_AGENT_STATUS_DIR/$pane/opencode"
   mkdir -p "$dir"
-  printf 'version=1\nsource=opencode\nrun=test-run\nowner=%s\npane=%%%s\nstate=%s\n' \
-    "$$" "$pane" "$state" >"$dir/report"
+  printf 'version=1\nsource=opencode\nrun=%s\nowner=%s\npane=%%%s\nstate=%s\n' \
+    "$run" "$$" "$pane" "$state" >"$dir/report"
 }
 
 refresh() {
@@ -120,16 +130,40 @@ refresh
 : >"$FAKE_TMUX_LOG"
 
 mkdir -p "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode"
-: >"$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.1"
+run_a_token="$(run_token run-a)"
+printf '%s\n' "$run_a_token" >"$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.1"
 export TMUX_AGENT_FAIL_CACHE_COMMIT=1
+write_report 9 waiting run-a
 refresh
 [[ -e "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.1" ]]
 unset TMUX_AGENT_FAIL_CACHE_COMMIT
 : >"$FAKE_TMUX_LOG"
 refresh
 [[ "$(window_state)" == done ]]
-grep -q '^%9 done waiting$' "$XDG_CACHE_HOME/tmux-agent-status/state"
+grep -q "^%9 done waiting $run_a_token$" "$XDG_CACHE_HOME/tmux-agent-status/state"
 [[ ! -e "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.1" ]]
+: >"$FAKE_TMUX_LOG"
+
+write_report 9 working run-a
+refresh
+write_report 9 waiting run-a
+printf '%s\n' "$run_a_token" >"$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.2"
+commit_sync="$TMP/cache-commit"
+mkdir "$commit_sync"
+TMUX_AGENT_PAUSE_CACHE_COMMIT="$commit_sync" refresh &
+old_refresh=$!
+wait_for_file "$commit_sync/ready"
+write_report 9 waiting run-b
+rm -f "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.2"
+: >"$commit_sync/release"
+wait "$old_refresh"
+: >"$FAKE_TMUX_LOG"
+refresh
+if [ "$(window_state)" != idle ]; then
+  echo "FAIL: run A cache history became run B done state" >&2
+  exit 1
+fi
+grep -q "^%9 idle waiting $(run_token run-b)$" "$XDG_CACHE_HOME/tmux-agent-status/state"
 : >"$FAKE_TMUX_LOG"
 
 sleep 5 &
@@ -144,7 +178,7 @@ kill -0 "$contending_refresh"
 kill "$lock_owner"
 wait "$lock_owner" 2>/dev/null || true
 wait "$contending_refresh"
-grep -q '^%9 working working$' "$XDG_CACHE_HOME/tmux-agent-status/state"
+grep -q "^%9 working working $(run_token test-run)$" "$XDG_CACHE_HOME/tmux-agent-status/state"
 
 publish_sync="$TMP/refresh-owner-publish"
 mkdir "$publish_sync"
