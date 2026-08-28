@@ -143,7 +143,7 @@ other agents.
 Add to `~/.tmux.conf`:
 
 ```tmux
-set -g @plugin 'RatulMaharaj/tmux-agent-status'
+set -g @plugin 'alex-irvine/tmux-agent-status'
 ```
 
 Then press `prefix + I` to fetch and load it. (TPM clones the repo to
@@ -152,7 +152,7 @@ Then press `prefix + I` to fetch and load it. (TPM clones the repo to
 ### Option B — manual clone
 
 ```sh
-git clone https://github.com/RatulMaharaj/tmux-agent-status ~/.tmux/plugins/tmux-agent-status
+git clone https://github.com/alex-irvine/tmux-agent-status ~/.tmux/plugins/tmux-agent-status
 ```
 
 Add to `~/.tmux.conf`, then reload with `tmux source-file ~/.tmux.conf`:
