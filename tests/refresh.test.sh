@@ -24,6 +24,10 @@ case "$1" in
     esac
     ;;
   list-windows)
+    if [ "${TMUX_AGENT_TEST_RECLAIMER:-}" = A ]; then
+      : >"$TMUX_AGENT_TEST_SYNC/a-scanning"
+      while [ ! -e "$TMUX_AGENT_TEST_SYNC/release-a" ]; do sleep 0.01; done
+    fi
     seen="$(cat "$FAKE_TMUX_STATE")"
     printf '@1 %s 1 test 1 agents\n' "$seen"
     ;;
@@ -51,7 +55,21 @@ case "$*" in
 esac
 exec /bin/mv "$@"
 EOF
-chmod +x "$TMP/bin/tmux" "$TMP/bin/ps" "$TMP/bin/mv"
+cat >"$TMP/bin/rm" <<'EOF'
+#!/bin/sh
+for path in "$@"; do
+  case "$path" in
+    *owner.999999.stale-race)
+      if [ "${TMUX_AGENT_TEST_RECLAIMER:-}" = B ]; then
+        : >"$TMUX_AGENT_TEST_SYNC/b-observed"
+        while [ ! -e "$TMUX_AGENT_TEST_SYNC/release-b" ]; do sleep 0.01; done
+      fi
+      ;;
+  esac
+done
+exec /bin/rm "$@"
+EOF
+chmod +x "$TMP/bin/tmux" "$TMP/bin/ps" "$TMP/bin/mv" "$TMP/bin/rm"
 export PATH="$TMP/bin:$PATH"
 export TMUX_AGENT_TEST_OWNER="$$"
 
@@ -67,6 +85,16 @@ refresh() {
   bash "$ROOT/scripts/refresh.sh"
 }
 
+wait_for_file() {
+  path="$1"
+  attempts=0
+  while [ ! -e "$path" ]; do
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 200 ] || return 1
+    sleep 0.01
+  done
+}
+
 window_state() {
   awk '$0 ~ /@agent_status_state/ { value=$NF } END { print value }' "$FAKE_TMUX_LOG"
 }
@@ -75,16 +103,17 @@ write_report 9 waiting
 refresh
 : >"$FAKE_TMUX_LOG"
 
-: >"$TMUX_AGENT_STATUS_DIR/9/opencode/pending-working.1"
+mkdir -p "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode"
+: >"$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.1"
 export TMUX_AGENT_FAIL_CACHE_COMMIT=1
 refresh
-[[ -e "$TMUX_AGENT_STATUS_DIR/9/opencode/pending-working.1" ]]
+[[ -e "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.1" ]]
 unset TMUX_AGENT_FAIL_CACHE_COMMIT
 : >"$FAKE_TMUX_LOG"
 refresh
 [[ "$(window_state)" == done ]]
 grep -q '^%9 done waiting$' "$XDG_CACHE_HOME/tmux-agent-status/state"
-[[ ! -e "$TMUX_AGENT_STATUS_DIR/9/opencode/pending-working.1" ]]
+[[ ! -e "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.1" ]]
 : >"$FAKE_TMUX_LOG"
 
 sleep 5 &
@@ -100,6 +129,28 @@ kill "$lock_owner"
 wait "$lock_owner" 2>/dev/null || true
 wait "$contending_refresh"
 grep -q '^%9 working working$' "$XDG_CACHE_HOME/tmux-agent-status/state"
+
+race_sync="$TMP/refresh-lock-race"
+mkdir "$race_sync"
+mkdir "$XDG_CACHE_HOME/tmux-agent-status/refresh.lock"
+: >"$XDG_CACHE_HOME/tmux-agent-status/refresh.lock/owner.999999.stale-race"
+TMUX_AGENT_TEST_RECLAIMER=B TMUX_AGENT_TEST_SYNC="$race_sync" bash "$ROOT/scripts/refresh.sh" &
+reclaimer_b=$!
+if ! wait_for_file "$race_sync/b-observed"; then
+  wait "$reclaimer_b" 2>/dev/null || true
+  echo "FAIL: second refresh reclaimer did not pause after stale observation" >&2
+  exit 1
+fi
+TMUX_AGENT_TEST_RECLAIMER=A TMUX_AGENT_TEST_SYNC="$race_sync" bash "$ROOT/scripts/refresh.sh" &
+reclaimer_a=$!
+wait_for_file "$race_sync/a-scanning"
+: >"$race_sync/release-b"
+kill -0 "$reclaimer_b"
+compgen -G "$XDG_CACHE_HOME/tmux-agent-status/refresh.lock/owner.*" >/dev/null
+[[ ! -e "$XDG_CACHE_HOME/tmux-agent-status/refresh.lock/owner.999999.stale-race" ]]
+: >"$race_sync/release-a"
+wait "$reclaimer_a"
+wait "$reclaimer_b"
 
 write_report 9 waiting
 : >"$FAKE_TMUX_LOG"

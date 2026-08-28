@@ -23,32 +23,47 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tmux-agent-status"
 CACHE="$CACHE_DIR/state"
 NEW="$CACHE.new"
 LOCKDIR="$CACHE_DIR/refresh.lock"
+LOCK_OWNER=
 CONSUMED="$CACHE_DIR/consumed.$$"
 mkdir -p "$CACHE_DIR"
 
 # --- Serialize: wait for daemon/event overlap so lifecycle edges are scanned --
 cleanup_refresh_lock() {
   rm -f "$CONSUMED"
-  if [ "$(cat "$LOCKDIR/pid" 2>/dev/null)" = "$$" ]; then
-    rm -rf "$LOCKDIR"
+  if [ -n "$LOCK_OWNER" ]; then
+    rm -f "$LOCK_OWNER"
+    rmdir "$LOCKDIR" 2>/dev/null
   fi
 }
 acquire_refresh_lock() {
-  local attempt=0 oldpid stale="$LOCKDIR.stale.$$"
+  local attempt=0 owner_file owner_name oldpid
   while ! mkdir "$LOCKDIR" 2>/dev/null; do
-    oldpid="$(cat "$LOCKDIR/pid" 2>/dev/null)"
+    owner_file=
+    for owner_file in "$LOCKDIR"/owner.* "$LOCKDIR/pid"; do
+      [ -f "$owner_file" ] && break
+      owner_file=
+    done
+    if [ -n "$owner_file" ]; then
+      owner_name="${owner_file##*/}"
+      case "$owner_name" in
+        owner.*) oldpid="${owner_name#owner.}"; oldpid="${oldpid%%.*}" ;;
+        pid) oldpid="$(cat "$owner_file" 2>/dev/null)" ;;
+      esac
+    else
+      oldpid=
+    fi
     case "$oldpid" in
       ''|0|*[!0-9]*)
         if [ "$attempt" -ge 5 ]; then
-          rm -rf "$stale"
-          mv "$LOCKDIR" "$stale" 2>/dev/null && rm -rf "$stale"
+          [ -z "$owner_file" ] || rm -f "$owner_file"
+          rmdir "$LOCKDIR" 2>/dev/null
           continue
         fi
         ;;
       *)
         if ! kill -0 "$oldpid" 2>/dev/null; then
-          rm -rf "$stale"
-          mv "$LOCKDIR" "$stale" 2>/dev/null && rm -rf "$stale"
+          rm -f "$owner_file"
+          rmdir "$LOCKDIR" 2>/dev/null
           continue
         fi
         ;;
@@ -57,7 +72,9 @@ acquire_refresh_lock() {
     [ "$attempt" -lt 200 ] || return 1
     sleep 0.01
   done
-  printf '%s\n' "$$" >"$LOCKDIR/pid" || {
+  LOCK_OWNER="$LOCKDIR/owner.$$.$(date +%s).$RANDOM.$RANDOM"
+  : >"$LOCK_OWNER" || {
+    LOCK_OWNER=
     rmdir "$LOCKDIR" 2>/dev/null
     return 1
   }

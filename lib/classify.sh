@@ -85,7 +85,7 @@ agent_status_pending_working() {
   local pane_number="${1#%}" agent="$2" marker found=0
   case "$pane_number" in ''|*[!0-9]*) return 1 ;; esac
   case "$agent" in ''|.|..|*/*) return 1 ;; esac
-  for marker in "$(agent_status_report_root)/$pane_number/$agent"/pending-working.*; do
+  for marker in "$(agent_status_report_root)/$pane_number/.edges/$agent"/pending-working.*; do
     [ -f "$marker" ] || continue
     printf '%s\n' "${marker##*.}"
     found=1
@@ -96,7 +96,7 @@ agent_status_pending_working() {
 agent_status_consume_working() {
   local pane_number="${1#%}" agent="$2" transition="$3"
   case "$transition" in ''|*[!0-9]*) return 1 ;; esac
-  rm -f "$(agent_status_report_root)/$pane_number/$agent/pending-working.$transition"
+  rm -f "$(agent_status_report_root)/$pane_number/.edges/$agent/pending-working.$transition"
 }
 
 # reported_state <pane_id> <agent> <pane_tty> -> working | blocked | waiting

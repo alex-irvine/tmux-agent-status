@@ -143,12 +143,20 @@ assert_rejected 'rejects dot as a source path' reported_state %9 . /dev/pts/9
 assert_rejected 'rejects dot-dot as a source path' reported_state %9 .. /dev/pts/9
 
 write_report opencode %9 123 working
-: >"$TMUX_AGENT_STATUS_DIR/9/opencode/pending-working.2"
-agent_status_consume_working %9 opencode 1
-if [ -e "$TMUX_AGENT_STATUS_DIR/9/opencode/pending-working.2" ]; then
-  pass 'an old refresh cannot consume a replacement working edge'
+mkdir -p "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode"
+: >"$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.1"
+old_transition="$(agent_status_pending_working %9 opencode)"
+if [ "$old_transition" != 1 ]; then
+  fail 'reads durable working edges outside the recreated run directory'
 else
-  fail 'an old refresh consumed a replacement working edge'
+  rm -f "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.1"
+  : >"$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.2"
+  agent_status_consume_working %9 opencode "$old_transition"
+  if [ -e "$TMUX_AGENT_STATUS_DIR/9/.edges/opencode/pending-working.2" ]; then
+    pass 'an old refresh cannot acknowledge a restarted run working edge'
+  else
+    fail 'an old refresh acknowledged a restarted run working edge'
+  fi
 fi
 
 if [ "$failures" -ne 0 ]; then
