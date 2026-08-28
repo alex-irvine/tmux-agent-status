@@ -57,6 +57,11 @@ A small background poller (`scripts/daemon.sh`) re-scans every few seconds, so:
 The poller is single-instance (a reload cleanly replaces it) and exits when the
 tmux server stops.
 
+With polling enabled (the default), the chooser opens immediately from cached
+event/poller state. Its worst-case freshness is `@agent_status_interval` (three
+seconds by default). With `@agent_status_poll off`, opening the chooser performs
+a synchronous on-demand refresh before rendering.
+
 ```tmux
 set -g @agent_status_interval       3              # poll seconds (default 3)
 set -g @agent_status_poll           on             # off to disable the poller

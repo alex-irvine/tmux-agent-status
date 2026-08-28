@@ -22,6 +22,7 @@ opt() { # opt <@option> <default>
 }
 
 KEY="$(opt @agent_status_key w)"
+POLL="$(opt @agent_status_poll on)"
 
 # State -> colour (any tmux colour: named, colourNNN, or #RRGGBB).
 CW="$(opt @agent_status_color_working yellow)"
@@ -46,7 +47,11 @@ fi
 # --- 1. Chooser key ----------------------------------------------------------
 WINROW="$CHOOSER_BADGE#{window_index}: #{window_name}#{window_flags}"
 FORMAT="#{?pane_format,#{pane_current_command},#{?window_format,$WINROW,#{session_name}}}"
-tmux bind-key "$KEY" run-shell "$REFRESH" '\;' choose-tree -Zw -F "$FORMAT"
+if [ "$POLL" = "off" ]; then
+  tmux bind-key "$KEY" run-shell "$REFRESH" '\;' choose-tree -Zw -F "$FORMAT"
+else
+  tmux bind-key "$KEY" choose-tree -Zw -F "$FORMAT"
+fi
 
 # --- 2. Live status-bar badge ------------------------------------------------
 # Append the badge to the window-status formats, preserving the user's theme.
@@ -65,7 +70,7 @@ if [ "$(opt @agent_status_statusbar on)" != "off" ]; then
 fi
 
 # --- 3. Background poller -----------------------------------------------------
-if [ "$(opt @agent_status_poll on)" != "off" ]; then
+if [ "$POLL" != "off" ]; then
   tmux run-shell -b "$DAEMON"
 fi
 
