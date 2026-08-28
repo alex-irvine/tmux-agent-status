@@ -169,7 +169,7 @@ while read -r window_id window_active session_attached session_name window_index
 
     praw="$(prev_raw "$pane_id")"
     pdisp="$(prev_disp "$pane_id")"
-    raw="$(classify_state "$pane_id" "$agent")"
+    raw="$(classify_state "$pane_id" "$agent" "$pane_tty")"
     disp="$(display_state "$raw" "$pdisp" "$seen")"
     printf '%s %s %s\n' "$pane_id" "$disp" "$raw" >> "$NEW"
 

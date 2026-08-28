@@ -33,8 +33,11 @@ session is attached and the window is active), so `(done)` highlights "an agent
 finished while you were away." The transition is tracked in a tiny per-pane
 cache under `$XDG_CACHE_HOME/tmux-agent-status/state`.
 
-Status detection currently has markers for **Claude Code**. Other agents still
-get a presence badge (their icon, no status label) until markers are added.
+Status detection has screen markers for **Claude Code**. Agent lifecycle
+integrations can also provide the standard semantic report described below;
+Claude Code and OpenCode integrations can use this capability. Other agents
+still get a presence badge (their icon, no status label) until they provide a
+report or screen markers are added.
 
 > The state taxonomy and colours are adapted from
 > [herdr](https://github.com/ogulcancelik/herdr) (an AGPL project) — concept
@@ -61,6 +64,13 @@ set -g @agent_status_statusbar      on             # off to keep badges out of t
 set -g @agent_status_statusbar_icon on             # off = status bar shows the label only (no icon)
 set -g @agent_status_notify         "done blocked" # states that notify; "" to silence
 set -g @agent_status_sound          Glass          # Notification Center sound name; "" for silent
+```
+
+For chooser-only use without live status-bar badges:
+
+```tmux
+set -g @agent_status_statusbar off
+set -g @plugin 'alex-irvine/tmux-agent-status'
 ```
 
 Notifications and their sound are delivered by your GUI session, so the sound
@@ -94,6 +104,29 @@ Claude Code renames its own process to its version string (e.g. `2.1.185`), so
 processes on its **tty** (`ps -t <tty>`) and match each process's command
 basename against a configurable agent list, preferring the foreground process.
 This catches agents regardless of how tmux labels the pane.
+
+### Semantic lifecycle reports
+
+Lifecycle integrations can report state without relying on an agent's visible
+screen. They write a version-1 report to
+`${TMUX_AGENT_STATUS_DIR}/<pane-number>/<source>/report` (by default under
+`${XDG_RUNTIME_DIR:-/tmp}/tmux-agent-status-<uid>`) with exactly these fields:
+
+```text
+version=1
+source=opencode
+run=<integration run identifier>
+owner=<agent process id>
+pane=%9
+state=working
+```
+
+`source` is the detected agent name and `state` is `working`, `blocked`, or
+`waiting`. Reports are parsed strictly as data, and are accepted only while the
+owner process is alive on the pane's tty. A valid semantic report takes
+precedence over screen markers. If the report is absent or invalid, detection
+preserves the existing Claude screen fallback and presence-only behavior for
+other agents.
 
 ## Requirements
 
@@ -205,8 +238,8 @@ set -g @agent_status_key w     # the prefix key to wrap (default: w)
 
 ## Roadmap
 
-- **More agent state markers** — per-state detection for Codex / opencode /
-  others (today they get a presence-only badge).
+- **More agent state integrations** — lifecycle reports or screen markers for
+  agents that currently get a presence-only badge.
 - **Cross-platform notifications** — Linux (`notify-send`) support; today
   notifications use macOS `osascript`.
 

@@ -66,7 +66,70 @@ EOF
   echo none
 }
 
-# classify_state <pane_id> <agent> -> working | blocked | waiting | unknown
+# Semantic reports are written by agent lifecycle integrations. Keep process
+# checks behind functions so platforms and tests can provide their own checks.
+agent_status_report_root() {
+  printf '%s' "${TMUX_AGENT_STATUS_DIR:-${XDG_RUNTIME_DIR:-/tmp}/tmux-agent-status-$(id -u)}"
+}
+
+agent_status_pid_alive() {
+  kill -0 "$1" 2>/dev/null
+}
+
+agent_status_pid_on_tty() {
+  ps -t "${2#/dev/}" -o pid= 2>/dev/null |
+    awk -v wanted="$1" '$1 == wanted { found=1 } END { exit !found }'
+}
+
+# reported_state <pane_id> <agent> <pane_tty> -> working | blocked | waiting
+#
+# Reports are data, not shell input. Accept exactly one of each version-1 field
+# and validate that its owner is still running on the pane's tty.
+reported_state() {
+  local pane_id="$1" agent="$2" pane_tty="$3"
+  local pane_number report line key value seen=" "
+  local version= source= run= owner= pane= state=
+
+  pane_number="${pane_id#%}"
+  case "$pane_number" in ''|*[!0-9]*) return 1 ;; esac
+  case "$agent" in ''|*/*) return 1 ;; esac
+  report="$(agent_status_report_root)/$pane_number/$agent/report"
+  [ -f "$report" ] || return 1
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in *=*) ;; *) return 1 ;; esac
+    key="${line%%=*}"
+    value="${line#*=}"
+    case "$key" in
+      version|source|run|owner|pane|state) ;;
+      *) return 1 ;;
+    esac
+    case "$seen" in *" $key "*) return 1 ;; esac
+    seen="$seen$key "
+    case "$key" in
+      version) version="$value" ;;
+      source) source="$value" ;;
+      run) run="$value" ;;
+      owner) owner="$value" ;;
+      pane) pane="$value" ;;
+      state) state="$value" ;;
+    esac
+  done <"$report"
+
+  for key in version source run owner pane state; do
+    case "$seen" in *" $key "*) ;; *) return 1 ;; esac
+  done
+  [ "$version" = 1 ] || return 1
+  [ "$source" = "$agent" ] || return 1
+  [ "$pane" = "$pane_id" ] || return 1
+  case "$owner" in ''|0|*[!0-9]*) return 1 ;; esac
+  case "$state" in working|blocked|waiting) ;; *) return 1 ;; esac
+  agent_status_pid_alive "$owner" || return 1
+  agent_status_pid_on_tty "$owner" "$pane_tty" || return 1
+  printf '%s\n' "$state"
+}
+
+# classify_state <pane_id> <agent> <pane_tty> -> working | blocked | waiting | unknown
 #
 # Reads the pane's visible screen and matches the agent's TUI. We only have
 # reliable markers for Claude Code today; other agents return "unknown" (the
@@ -77,7 +140,11 @@ EOF
 #   blocked  — a numbered selection menu "❯ 1. Yes" (permission / plan prompts)
 #   waiting  — agent is at its prompt, nothing running and nothing to approve
 classify_state() {
-  local pane_id="$1" agent="$2" buf
+  local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported
+  if reported="$(reported_state "$pane_id" "$agent" "$pane_tty")"; then
+    echo "$reported"
+    return
+  fi
   case "$agent" in
     claude) ;;                       # supported below
     *) echo unknown; return ;;       # no heuristics for this agent yet
