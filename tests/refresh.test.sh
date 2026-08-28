@@ -69,7 +69,23 @@ for path in "$@"; do
 done
 exec /bin/rm "$@"
 EOF
-chmod +x "$TMP/bin/tmux" "$TMP/bin/ps" "$TMP/bin/mv" "$TMP/bin/rm"
+cat >"$TMP/bin/mkdir" <<'EOF'
+#!/bin/sh
+if ! /bin/mkdir "$@"; then
+  exit 1
+fi
+for path in "$@"; do
+  [ "${TMUX_AGENT_TEST_LOCK:-}" = "$path" ] || continue
+  case "${TMUX_AGENT_TEST_LOCK_CREATOR:-}" in
+    A)
+      : >"$TMUX_AGENT_TEST_SYNC/a-created"
+      while [ ! -e "$TMUX_AGENT_TEST_SYNC/publish-a" ]; do sleep 0.01; done
+      ;;
+    B) : >"$TMUX_AGENT_TEST_SYNC/b-acquired" ;;
+  esac
+done
+EOF
+chmod +x "$TMP/bin/tmux" "$TMP/bin/ps" "$TMP/bin/mv" "$TMP/bin/rm" "$TMP/bin/mkdir"
 export PATH="$TMP/bin:$PATH"
 export TMUX_AGENT_TEST_OWNER="$$"
 
@@ -129,6 +145,27 @@ kill "$lock_owner"
 wait "$lock_owner" 2>/dev/null || true
 wait "$contending_refresh"
 grep -q '^%9 working working$' "$XDG_CACHE_HOME/tmux-agent-status/state"
+
+publish_sync="$TMP/refresh-owner-publish"
+mkdir "$publish_sync"
+refresh_lock="$XDG_CACHE_HOME/tmux-agent-status/refresh.lock"
+TMUX_AGENT_TEST_LOCK_CREATOR=A TMUX_AGENT_TEST_LOCK="$refresh_lock" \
+  TMUX_AGENT_TEST_SYNC="$publish_sync" bash "$ROOT/scripts/refresh.sh" &
+owner_publisher=$!
+wait_for_file "$publish_sync/a-created"
+TMUX_AGENT_TEST_LOCK_CREATOR=B TMUX_AGENT_TEST_LOCK="$refresh_lock" \
+  TMUX_AGENT_TEST_SYNC="$publish_sync" bash "$ROOT/scripts/refresh.sh" &
+owner_contender=$!
+wait "$owner_contender" 2>/dev/null || true
+if [ -e "$publish_sync/b-acquired" ] || [ ! -d "$refresh_lock" ]; then
+  : >"$publish_sync/publish-a"
+  wait "$owner_publisher" 2>/dev/null || true
+  echo "FAIL: refresh contender reclaimed an ownerless publishing lock" >&2
+  exit 1
+fi
+: >"$publish_sync/publish-a"
+wait "$owner_publisher"
+refresh
 
 race_sync="$TMP/refresh-lock-race"
 mkdir "$race_sync"

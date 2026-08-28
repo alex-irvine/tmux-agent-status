@@ -53,13 +53,7 @@ acquire_refresh_lock() {
       oldpid=
     fi
     case "$oldpid" in
-      ''|0|*[!0-9]*)
-        if [ "$attempt" -ge 5 ]; then
-          [ -z "$owner_file" ] || rm -f "$owner_file"
-          rmdir "$LOCKDIR" 2>/dev/null
-          continue
-        fi
-        ;;
+      ''|0|*[!0-9]*) ;;
       *)
         if ! kill -0 "$oldpid" 2>/dev/null; then
           rm -f "$owner_file"
