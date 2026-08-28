@@ -4,7 +4,8 @@
 # rename the window, and fire a system notification on important transitions
 # (agent finished while you were away / agent now needs you).
 #
-# Run both on-demand (the `w` binding) and continuously (scripts/daemon.sh).
+# Run continuously by daemon, at startup, after semantic events, and on-demand
+# from the `w` binding only when polling is disabled.
 # A lock serializes overlapping runs so notifications fire exactly once.
 #
 # Written for bash 3.2 (macOS system bash): no associative arrays.

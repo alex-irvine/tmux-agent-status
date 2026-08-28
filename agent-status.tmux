@@ -6,7 +6,7 @@
 # then reload: tmux source-file ~/.tmux.conf
 #
 # Wires up three things:
-#   1. C-a w  -> refresh + choose-tree, badges colored by agent state.
+#   1. C-a w  -> cached choose-tree (or refresh first when polling is off).
 #   2. A live badge in the status bar (appended to window-status-format).
 #   3. A background poller (scripts/daemon.sh) that keeps badges fresh and
 #      fires notifications when an agent finishes / needs you.

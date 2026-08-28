@@ -22,7 +22,7 @@ fail() {
 }
 
 binding_for() {
-  local poll="$1" calls="$TMP/calls-$1"
+  local poll="$1" calls="$TMP/calls-${2:-$1}"
   : >"$calls"
   TEST_POLL="$poll" TMUX_CALLS="$calls" PATH="$TMP/bin:$PATH" \
     bash "$ROOT/agent-status.tmux"
@@ -40,6 +40,11 @@ poll_on_bind="$(binding_for on)"
 [[ "$poll_on_bind" == *'@agent_status'* ]] || fail "polling-on binding omitted status badge"
 [[ "$poll_on_bind" == *'@agent_status_state'* ]] || fail "polling-on binding omitted status colour state"
 grep -q 'run-shell -b .*/scripts/daemon.sh' "$(calls_for on)" || fail "polling-on mode omitted daemon"
+
+default_bind="$(binding_for "" default)"
+[[ "$default_bind" == *"choose-tree -Zw -F"* ]] || fail "default binding omitted chooser"
+[[ "$default_bind" != *"run-shell"* ]] || fail "default binding refreshes synchronously"
+grep -q 'run-shell -b .*/scripts/daemon.sh' "$(calls_for default)" || fail "default mode omitted daemon"
 
 poll_off_bind="$(binding_for off)"
 [[ "$poll_off_bind" == *"run-shell"* ]] || fail "polling-off binding omitted refresh"

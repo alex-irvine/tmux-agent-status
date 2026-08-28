@@ -3,10 +3,9 @@
 See at a glance which of your tmux windows are running a coding agent — right in
 the window chooser (`prefix + w`).
 
-Pressing the chooser key refreshes every window, detects whether an agent
-(Claude Code, Codex, opencode, …) is running in any of its panes and what it's
-doing, then prepends a badge — the agent icon plus a bracketed status label,
-colored by state — to windows that have one:
+The plugin detects whether an agent (Claude Code, Codex, opencode, …) is running
+in each window and prepends a badge — the agent icon plus a bracketed status
+label, colored by state — to windows that have one:
 
 ```
 🤖 (working) 1: api      ← label in yellow
@@ -58,9 +57,10 @@ The poller is single-instance (a reload cleanly replaces it) and exits when the
 tmux server stops.
 
 With polling enabled (the default), the chooser opens immediately from cached
-event/poller state. Its worst-case freshness is `@agent_status_interval` (three
-seconds by default). With `@agent_status_poll off`, opening the chooser performs
-a synchronous on-demand refresh before rendering.
+event/poller state. The daemon normally refreshes after each
+`@agent_status_interval` sleep (three seconds by default), plus scan and
+scheduling time. With `@agent_status_poll off`, opening the chooser performs a
+synchronous on-demand refresh before rendering.
 
 ```tmux
 set -g @agent_status_interval       3              # poll seconds (default 3)
