@@ -49,7 +49,7 @@ A small background poller (`scripts/daemon.sh`) re-scans every few seconds, so:
 - the **status bar** shows a live colored badge on every window (no need to open
   the chooser) — the badge is appended to your `window-status-format`, preserving
   your existing theme;
-- you get a **system notification** (macOS) when an agent **finishes**
+- you get a **system notification** (Linux and macOS) when an agent **finishes**
   (working → stopped) or **becomes blocked** waiting on you — wherever you're
   looking.
 
@@ -68,7 +68,7 @@ set -g @agent_status_poll           on             # off to disable the poller
 set -g @agent_status_statusbar      on             # off to keep badges out of the status bar
 set -g @agent_status_statusbar_icon on             # off = status bar shows the label only (no icon)
 set -g @agent_status_notify         "done blocked" # states that notify; "" to silence
-set -g @agent_status_sound          Glass          # Notification Center sound name; "" for silent
+set -g @agent_status_sound          Glass          # macOS: Notification Center sound; Linux: freedesktop sound id or file; "" for silent
 ```
 
 For chooser-only use without live status-bar badges:
@@ -79,9 +79,35 @@ set -g @plugin 'alex-irvine/tmux-agent-status'
 ```
 
 Notifications and their sound are delivered by your GUI session, so the sound
-plays even from inside tmux. The plugin prefers
-[`terminal-notifier`](https://github.com/julienXX/terminal-notifier) if it's
-installed (most reliable — its own notification identity and permission):
+plays even from inside tmux. Test the real delivery path with:
+
+```sh
+~/.tmux/plugins/tmux-agent-status/scripts/test-notification.sh          # diagnostic
+~/.tmux/plugins/tmux-agent-status/scripts/test-notification.sh sounds   # audition sounds
+```
+
+### Linux
+
+Banners go through `notify-send` (libnotify) to whatever freedesktop
+notification daemon your desktop runs (GNOME, KDE, dunst, mako, swaync, …).
+A **blocked** notification is sent with *critical* urgency so it stays on screen
+until you deal with it; **done** is normal urgency. If the tmux server was
+started without `DBUS_SESSION_BUS_ADDRESS` (systemd unit, ssh), the plugin
+falls back to the per-user bus at `$XDG_RUNTIME_DIR/bus`.
+
+`@agent_status_sound` is a freedesktop sound-theme id (default
+`message-new-instant`), played through libcanberra (`canberra-gtk-play`), or a
+file path played through `pw-play` / `paplay`. Set it to `""` for silent banners.
+
+```sh
+sudo pacman -S libnotify libcanberra sound-theme-freedesktop   # Arch
+sudo apt install libnotify-bin libcanberra-gtk3-module sound-theme-freedesktop   # Debian/Ubuntu
+```
+
+### macOS
+
+The plugin prefers [`terminal-notifier`](https://github.com/julienXX/terminal-notifier)
+if it's installed (most reliable — its own notification identity and permission):
 
 ```sh
 brew install terminal-notifier
@@ -89,18 +115,9 @@ brew install terminal-notifier
 
 Without it, it falls back to `osascript`, whose notifications post as "Script
 Editor" and are **silently dropped if that host isn't allowed** in System
-Settings. If you hear/see nothing, run `scripts/test-notification.sh` (below).
-
-Not hearing anything? Run the diagnostic — it fires the real Notification
-Center banner + sound, and shows recently-fired notifications:
-
-```sh
-~/Projects/tmux-agent-status/scripts/test-notification.sh
-```
-
-If you get no banner/sound, notifications are blocked for the scripting host:
-**System Settings → Notifications → "Script Editor" → Allow Notifications**
-(it appears there after the first attempt), and disable Focus / Do Not Disturb.
+Settings → Notifications → "Script Editor" → Allow Notifications (it appears
+there after the first attempt); also disable Focus / Do Not Disturb.
+`@agent_status_sound` is a Notification Center sound name (default `Glass`).
 
 ## How detection works
 
@@ -178,10 +195,11 @@ replaces run state and clears prior pending edges.
 ## Requirements
 
 - tmux 3.x, bash, `ps` (standard on macOS/Linux).
-- Notifications are **macOS** today. Optional but recommended:
-  [`terminal-notifier`](https://github.com/julienXX/terminal-notifier)
-  (`brew install terminal-notifier`) for reliable banners + sound; without it the
-  plugin falls back to `osascript`. (Linux `notify-send` is on the roadmap.)
+- Notifications, optional:
+  - **Linux**: `notify-send` (libnotify) and a running notification daemon;
+    `canberra-gtk-play` (libcanberra) plus `sound-theme-freedesktop` for sound.
+  - **macOS**: [`terminal-notifier`](https://github.com/julienXX/terminal-notifier)
+    recommended (`brew install terminal-notifier`); falls back to `osascript`.
 
 ## Install
 
@@ -287,8 +305,6 @@ set -g @agent_status_key w     # the prefix key to wrap (default: w)
 
 - **More agent state integrations** — lifecycle reports or screen markers for
   agents that currently get a presence-only badge.
-- **Cross-platform notifications** — Linux (`notify-send`) support; today
-  notifications use macOS `osascript`.
 
 ## License
 

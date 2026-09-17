@@ -89,7 +89,6 @@ GLOBAL_ICON="$(tmux_opt @agent_status_icon 🤖)"
 RENAME="$(tmux_opt @agent_status_rename off)"
 AGENTS_ORDER="$(agent_status_agents)"
 NOTIFY="$(tmux_opt @agent_status_notify 'done blocked')"   # states that notify
-SOUND="$(tmux_opt @agent_status_sound Glass)"              # empty = silent
 
 # --- State -> bracketed label (colored by the chooser/status-bar format) -----
 L_WORKING="$(tmux_opt @agent_status_label_working working)"
@@ -115,31 +114,90 @@ icon_for() {
   if [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "$GLOBAL_ICON"; fi
 }
 
-# --- Notifications (macOS) ---------------------------------------------------
+# --- Notifications (Linux + macOS) -------------------------------------------
 should_notify() { case " $NOTIFY " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
-# Notify + play a sound. Delivery is by the notification system in your GUI
-# session (not this process), so the sound works even when tmux's server has no
-# audio session (where `afplay` fails with "AudioQueueStart").
-#
-# Prefers terminal-notifier if installed — it has its own notification identity
-# and permission, far more reliable than osascript (which posts as "Script
-# Editor" and is silently dropped if that host isn't allowed). Falls back to
-# osascript. @agent_status_sound is a Notification Center sound name (e.g.
-# "Glass", "Ping"); empty = silent banner.
-notify() { # notify <title> <message>
-  local title msg
+# Backend: macOS prefers terminal-notifier (own notification identity and
+# permission) and falls back to osascript; Linux uses notify-send (any
+# freedesktop notification daemon: GNOME, KDE, dunst, mako, swaync, ...).
+notify_backend() {
+  if command -v terminal-notifier >/dev/null 2>&1; then echo terminal-notifier
+  elif [ "$(uname -s 2>/dev/null)" = Darwin ] && command -v osascript >/dev/null 2>&1; then echo osascript
+  elif command -v notify-send >/dev/null 2>&1; then echo notify-send
+  else echo none
+  fi
+}
+
+# Default sound per platform: a Notification Center sound name on macOS, a
+# freedesktop sound-theme id on Linux. @agent_status_sound overrides either.
+default_sound() {
+  if [ "$(uname -s 2>/dev/null)" = Darwin ]; then echo Glass; else echo message-new-instant; fi
+}
+
+# The tmux server may have been started without a session bus in its
+# environment (systemd unit, ssh). Point at the per-user bus when it exists.
+linux_session_env() {
+  [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && return 0
+  local rt="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  [ -S "$rt/bus" ] && export DBUS_SESSION_BUS_ADDRESS="unix:path=$rt/bus"
+  return 0
+}
+
+# Linux sound: play it ourselves so it works regardless of whether the
+# notification daemon honours sound hints. A theme id goes through libcanberra;
+# a file path goes through PipeWire/PulseAudio.
+play_sound_linux() { # play_sound_linux <theme-id|/path/to/file>
+  local sound="$1"
+  [ -n "$sound" ] || return 0
+  case "$sound" in
+    */*)
+      [ -f "$sound" ] || return 0
+      if command -v pw-play >/dev/null 2>&1; then pw-play "$sound" >/dev/null 2>&1 &
+      elif command -v paplay >/dev/null 2>&1; then paplay "$sound" >/dev/null 2>&1 &
+      fi
+      ;;
+    *)
+      if command -v canberra-gtk-play >/dev/null 2>&1; then
+        canberra-gtk-play -i "$sound" -d tmux-agent-status >/dev/null 2>&1 &
+      fi
+      ;;
+  esac
+  return 0
+}
+
+# notify <title> <message> [kind]   kind = done | blocked
+# Delivery is by the notification system in your GUI session (not this
+# process), so it works from inside tmux where audio may not be reachable.
+# On Linux a "blocked" notification is sent with critical urgency so it stays
+# on screen until dismissed; "done" is normal urgency.
+notify() {
+  local title msg kind="${3:-done}" urgency=normal backend
   title="$(printf '%s' "$1" | tr -d '"\\')"
   msg="$(printf '%s' "$2" | tr -d '"\\')"
   printf '%s  %s | %s\n' "$(date '+%H:%M:%S')" "$title" "$msg" >> "$CACHE_DIR/notify.log" 2>/dev/null
-  if command -v terminal-notifier >/dev/null 2>&1; then
-    terminal-notifier -title "$title" -message "$msg" ${SOUND:+-sound "$SOUND"} >/dev/null 2>&1 &
-  else
-    local sound_clause=""
-    [ -n "$SOUND" ] && sound_clause=" sound name \"$SOUND\""
-    osascript -e "display notification \"$msg\" with title \"$title\"$sound_clause" >/dev/null 2>&1 &
-  fi
+  backend="$(notify_backend)"
+  case "$backend" in
+    terminal-notifier)
+      terminal-notifier -title "$title" -message "$msg" ${SOUND:+-sound "$SOUND"} >/dev/null 2>&1 &
+      ;;
+    osascript)
+      local sound_clause=""
+      [ -n "$SOUND" ] && sound_clause=" sound name \"$SOUND\""
+      osascript -e "display notification \"$msg\" with title \"$title\"$sound_clause" >/dev/null 2>&1 &
+      ;;
+    notify-send)
+      linux_session_env
+      [ "$kind" = blocked ] && urgency=critical
+      notify-send -a tmux-agent-status -i utilities-terminal -u "$urgency" \
+        -h string:x-canonical-private-synchronous:tmux-agent-status \
+        "$title" "$msg" >/dev/null 2>&1 &
+      play_sound_linux "$SOUND"
+      ;;
+    *) ;;
+  esac
 }
+
+SOUND="$(tmux_opt @agent_status_sound "$(default_sound)")"  # empty = silent
 
 # Cache columns: "<pane_id> <display_state> <raw_state> <run-token>"
 prev_disp() { [ -f "$CACHE" ] && awk -v p="$1" '$1==p {print $2; exit}' "$CACHE"; }
@@ -235,9 +293,9 @@ while read -r window_id window_active session_attached session_name window_index
     # Notify on the raw transition — independent of which window you're viewing.
     if [ "$NO_NOTIFY" = 0 ]; then
       if [ "$raw" = "waiting" ] && [ "$praw" = "working" ] && should_notify done; then
-        notify "🤖 $agent finished" "$window_name — $session_name"
+        notify "🤖 $agent finished" "$window_name — $session_name" done
       elif [ "$raw" = "blocked" ] && [ "$praw" != "blocked" ] && should_notify blocked; then
-        notify "🤖 $agent needs you" "$window_name — $session_name"
+        notify "🤖 $agent needs you" "$window_name — $session_name" blocked
       fi
     fi
 

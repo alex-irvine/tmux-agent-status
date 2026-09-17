@@ -253,4 +253,37 @@ write_report 10 blocked
 refresh
 [[ "$(window_state)" == blocked ]]
 
+# --- Linux notifications: notify-send + libcanberra on raw transitions -------
+NOTIFY_LOG="$TMP/notify.log"
+export NOTIFY_LOG
+cat >"$TMP/bin/uname" <<'EOS'
+#!/bin/sh
+echo Linux
+EOS
+cat >"$TMP/bin/notify-send" <<'EOS'
+#!/bin/sh
+printf 'notify-send %s\n' "$*" >>"$NOTIFY_LOG"
+EOS
+cat >"$TMP/bin/canberra-gtk-play" <<'EOS'
+#!/bin/sh
+printf 'canberra %s\n' "$*" >>"$NOTIFY_LOG"
+EOS
+chmod +x "$TMP/bin/uname" "$TMP/bin/notify-send" "$TMP/bin/canberra-gtk-play"
+rm -f "$FAKE_TMUX_STATE.multi"
+write_report 9 working
+: >"$FAKE_TMUX_LOG"
+refresh
+: >"$NOTIFY_LOG"
+write_report 9 waiting
+refresh
+sleep 0.1
+grep -q '^notify-send .*-u normal .*opencode finished' "$NOTIFY_LOG"
+grep -q '^canberra -i message-new-instant' "$NOTIFY_LOG"
+: >"$NOTIFY_LOG"
+write_report 9 blocked
+refresh
+sleep 0.1
+grep -q '^notify-send .*-u critical .*opencode needs you' "$NOTIFY_LOG"
+rm -f "$TMP/bin/uname" "$TMP/bin/notify-send" "$TMP/bin/canberra-gtk-play"
+
 echo "PASS: tmux refresh tests"

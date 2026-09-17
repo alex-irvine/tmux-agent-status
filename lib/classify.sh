@@ -81,6 +81,15 @@ agent_status_pid_on_tty() {
     awk -v wanted="$1" '$1 == wanted { found=1 } END { exit !found }'
 }
 
+agent_status_report_fresh() {
+  local report="$1" now modified
+  now="$(date +%s)"
+  modified="$(stat -c %Y "$report" 2>/dev/null || stat -f %m "$report" 2>/dev/null)"
+  case "$now" in ''|*[!0-9]*) return 1 ;; esac
+  case "$modified" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$modified" -le "$now" ] && [ $((now - modified)) -le 10 ]
+}
+
 agent_status_encode() {
   printf '%s' "$1" | LC_ALL=C od -An -v -tx1 | tr -d '[:space:]'
 }
@@ -165,26 +174,38 @@ reported_state() {
 
 # classify_status <pane_id> <agent> <pane_tty> -> "<state> <run-token>"
 #
-# Reads the pane's visible screen and matches the agent's TUI. We only have
-# reliable markers for Claude Code today; other agents return "unknown" (the
-# window still shows the agent icon, just no status dot). Markers, from real
-# Claude output:
+# Reads the pane's visible screen and matches the Claude Code and OpenCode TUIs.
+# Other agents return "unknown" (the window still shows the agent icon, just no
+# status dot). Claude markers, from real output:
 #   working  — live spinner "Tempering… (14s · ↓ 607 tokens)" or "esc to interrupt"
 #              (note: a *completed* "✻ Brewed for 20m 22s" line has no "… (" timer)
 #   blocked  — a numbered selection menu "❯ 1. Yes" (permission / plan prompts)
 #   waiting  — agent is at its prompt, nothing running and nothing to approve
 classify_status() {
-  local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported
+  local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported report
   if reported="$(reported_status "$pane_id" "$agent" "$pane_tty")"; then
-    echo "$reported"
-    return
+    report="$(agent_status_report_root)/${pane_id#%}/$agent/report"
+    if [ "$agent" != opencode ] || [ "${reported%% *}" != working ] ||
+       agent_status_report_fresh "$report"; then
+      echo "$reported"
+      return
+    fi
   fi
-  case "$agent" in
-    claude) ;;                       # supported below
-    *) echo 'unknown -'; return ;;   # no heuristics for this agent yet
-  esac
   buf="$(tmux capture-pane -p -t "$pane_id" 2>/dev/null)"
   [ -n "$buf" ] || { echo 'unknown -'; return; }
+  case "$agent" in
+    opencode)
+      if printf '%s\n' "$buf" | grep -qE 'esc[[:space:]]+interrupt'; then
+        echo 'working -'; return
+      fi
+      if printf '%s\n' "$buf" | grep -qE 'Permission required|Allow once[[:space:]]+Allow always|enter[[:space:]]+submit[[:space:]]+esc[[:space:]]+dismiss'; then
+        echo 'blocked -'; return
+      fi
+      echo 'waiting -'; return
+      ;;
+    claude) ;;
+    *) echo 'unknown -'; return ;;
+  esac
   if printf '%s\n' "$buf" | grep -qE 'esc to interrupt|…[[:space:]]*\([0-9]'; then
     echo 'working -'; return
   fi
