@@ -158,6 +158,34 @@ capture='up/down select   enter choose   tab next   esc dismiss'
 assert_state 'detects OpenCode selection forms without a report' blocked classify_state %9 opencode /dev/pts/9
 capture='Allow once   Always allow   Reject'
 assert_state 'detects OpenCode permission choices without a report' blocked classify_state %9 opencode /dev/pts/9
+capture='  ┃
+  ┃
+  ┃  Build · DeepSeek V4.1 Flash OpenRouter · max
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   ■■⬝⬝⬝⬝⬝⬝⬝⬝ esc interrupt                                                                258.9K (25%) · $0.12  ctrl+p commands    ~/dotfiles:master'
+assert_state 'detects a running footer at the foot of a full pane' working classify_state %9 opencode /dev/pts/9
+capture='     ⬝⬝⬝⬝⬝⬝⬝⬝ esc interrupt    (stale line captured from another pane)
+  ┃
+  ┃
+  ┃  Build · DeepSeek V4.1 Flash OpenRouter · max
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ~/dotfiles:master   12.6K (1%) · $0.00  ctrl+p commands    ~/dotfiles:master'
+assert_state 'ignores stale working markers outside the footer' waiting classify_state %9 opencode /dev/pts/9
+capture='  ┃  old transcript: ↑↓ select  enter submit  esc dismiss
+  ┃
+  ┃
+  ┃  Build · DeepSeek V4.1 Flash OpenRouter · max
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ~/dotfiles:master   12.6K (1%) · $0.00  ctrl+p commands    ~/dotfiles:master'
+assert_state 'ignores stale blocked markers outside the footer' waiting classify_state %9 opencode /dev/pts/9
+capture='  ┃  Which colour should the new button be?
+  ┃  1. Blue
+  ┃  2. Green
+  ┃  3. Type your own answer
+  ┃
+  ┃  ↑↓ select  enter submit  esc dismiss
+  ┃                                                               ~/dotfiles:master'
+assert_state 'detects a question footer at the foot of a full pane' blocked classify_state %9 opencode /dev/pts/9
 capture='Build · GPT-5.6 Sol'
 assert_state 'detects OpenCode waiting without a report' waiting classify_state %9 opencode /dev/pts/9
 

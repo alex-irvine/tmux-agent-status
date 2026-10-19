@@ -182,7 +182,7 @@ reported_state() {
 #   blocked  — a numbered selection menu "❯ 1. Yes" (permission / plan prompts)
 #   waiting  — agent is at its prompt, nothing running and nothing to approve
 classify_status() {
-  local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported report
+  local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported report bottom
   if reported="$(reported_status "$pane_id" "$agent" "$pane_tty")"; then
     report="$(agent_status_report_root)/${pane_id#%}/$agent/report"
     if [ "$agent" != opencode ] || [ "${reported%% *}" != working ] ||
@@ -195,12 +195,16 @@ classify_status() {
   [ -n "$buf" ] || { echo 'unknown -'; return; }
   case "$agent" in
     opencode)
-      if printf '%s\n' "$buf" | grep -qE 'esc[[:space:]]+interrupt'; then
+      # State hints live in the input/status area at the foot of the pane:
+      # "esc interrupt" shares the status line while running; ask/forms cards
+      # end their footer with "esc dismiss" (permissions: "enter confirm  esc
+      # reject|cancel", options Allow once/Always allow). Match only those
+      # bottom lines so transcript text can never fake a state.
+      bottom="$(printf '%s\n' "$buf" | tail -n 5)"
+      if printf '%s\n' "$bottom" | grep -qE 'esc[[:space:]]+interrupt'; then
         echo 'working -'; return
       fi
-      # Every ask/forms card ends its footer with "esc dismiss"; permission cards
-      # use "enter confirm  esc reject|cancel" and list Allow once/Always allow.
-      if printf '%s\n' "$buf" | grep -qE 'Permission required|Allow once|Always allow|Allow always|enter[[:space:]]+confirm|esc[[:space:]]+dismiss'; then
+      if printf '%s\n' "$bottom" | grep -qE 'Permission required|Allow once|Always allow|Allow always|enter[[:space:]]+confirm|esc[[:space:]]+dismiss'; then
         echo 'blocked -'; return
       fi
       echo 'waiting -'; return
