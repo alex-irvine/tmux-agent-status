@@ -198,7 +198,9 @@ classify_status() {
       if printf '%s\n' "$buf" | grep -qE 'esc[[:space:]]+interrupt'; then
         echo 'working -'; return
       fi
-      if printf '%s\n' "$buf" | grep -qE 'Permission required|Allow once[[:space:]]+Allow always|enter[[:space:]]+submit[[:space:]]+esc[[:space:]]+dismiss'; then
+      # Every ask/forms card ends its footer with "esc dismiss"; permission cards
+      # use "enter confirm  esc reject|cancel" and list Allow once/Always allow.
+      if printf '%s\n' "$buf" | grep -qE 'Permission required|Allow once|Always allow|Allow always|enter[[:space:]]+confirm|esc[[:space:]]+dismiss'; then
         echo 'blocked -'; return
       fi
       echo 'waiting -'; return

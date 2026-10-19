@@ -12,6 +12,8 @@ tests=0
 failures=0
 alive_owner=123
 tty_owner=123
+fresh_report=1
+capture='esc to interrupt'
 
 agent_status_pid_alive() {
   [ "$1" = "$alive_owner" ]
@@ -21,9 +23,13 @@ agent_status_pid_on_tty() {
   [ "$1" = "$tty_owner" ] && [ "$2" = "/dev/pts/9" ]
 }
 
+agent_status_report_fresh() {
+  [ "$fresh_report" = 1 ]
+}
+
 tmux() {
   if [ "${1:-}" = capture-pane ]; then
-    printf '%s\n' 'esc to interrupt'
+    printf '%s\n' "$capture"
     return 0
   fi
   return 1
@@ -136,6 +142,31 @@ assert_rejected 'rejects a nonnumeric owner' reported_state %9 opencode /dev/pts
 remove_reports
 assert_rejected 'rejects a missing report' reported_state %9 claude /dev/pts/9
 assert_state 'preserves Claude screen fallback without a report' working classify_state %9 claude /dev/pts/9
+
+capture='⬝⬝■■ esc interrupt'
+assert_state 'detects OpenCode working without a report' working classify_state %9 opencode /dev/pts/9
+capture='Permission required
+Allow once   Allow always   Reject'
+assert_state 'detects OpenCode blocked without a report' blocked classify_state %9 opencode /dev/pts/9
+capture='↑↓ select  enter submit  esc dismiss'
+assert_state 'detects OpenCode questions without a report' blocked classify_state %9 opencode /dev/pts/9
+capture='⇆ tab  ↑↓ select  enter confirm  esc dismiss'
+assert_state 'detects OpenCode multi-question forms without a report' blocked classify_state %9 opencode /dev/pts/9
+capture='⇆ select  enter confirm  esc reject'
+assert_state 'detects OpenCode permission forms without a report' blocked classify_state %9 opencode /dev/pts/9
+capture='up/down select   enter choose   tab next   esc dismiss'
+assert_state 'detects OpenCode selection forms without a report' blocked classify_state %9 opencode /dev/pts/9
+capture='Allow once   Always allow   Reject'
+assert_state 'detects OpenCode permission choices without a report' blocked classify_state %9 opencode /dev/pts/9
+capture='Build · GPT-5.6 Sol'
+assert_state 'detects OpenCode waiting without a report' waiting classify_state %9 opencode /dev/pts/9
+
+write_report opencode %9 123 working
+fresh_report=0
+assert_state 'does not trust a stale OpenCode working report' waiting classify_state %9 opencode /dev/pts/9
+fresh_report=1
+assert_state 'trusts a fresh OpenCode working report' working classify_state %9 opencode /dev/pts/9
+capture='esc to interrupt'
 
 mkdir -p "$TMUX_AGENT_STATUS_DIR/9"
 printf 'version=1\nsource=.\nrun=test-run\nowner=123\npane=%%9\nstate=working\n' >"$TMUX_AGENT_STATUS_DIR/9/report"
