@@ -189,11 +189,49 @@ assert_state 'detects a question footer at the foot of a full pane' blocked clas
 capture='Build · GPT-5.6 Sol'
 assert_state 'detects OpenCode waiting without a report' waiting classify_state %9 opencode /dev/pts/9
 
+capture='  ┃
+  ┃
+  ┃  Build · DeepSeek V4.1 Flash OpenRouter · max
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ~/dotfiles:master   ↓ 1 shell · 12.4K (1%) · $0.00  ctrl+p commands    ~/dotfiles:master'
+assert_state 'detects a background shell in the status line as working' working classify_state %9 opencode /dev/pts/9
+
+capture='  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ~/dotfiles:master   ↓ 1 subagent · 1 shell · 10.7K (1%) · $0.00  ctrl+p commands    ~/dotfiles:master'
+assert_state 'detects background subagents and shells as working' working classify_state %9 opencode /dev/pts/9
+
+capture='  ~/dotfiles:master   ↓ 2 shells · 13.3K (1%) · $0.00  ctrl+p commands'
+assert_state 'detects plural background shells as working' working classify_state %9 opencode /dev/pts/9
+
+capture='  ┃  Which colour should the new button be?
+  ┃
+  ┃  Allow once   Allow always   Reject
+  ┃  ↓ 1 subagent · 10.7K (1%) · $0.00
+  ┃  enter confirm  esc dismiss'
+assert_state 'prefers a blocking prompt over background work' blocked classify_state %9 opencode /dev/pts/9
+
+capture='  ┃  transcript: ↓ 2 shells running now
+  ┃
+  ┃
+  ┃  Build · DeepSeek V4.1 Flash OpenRouter · max
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ~/dotfiles:master   12.6K (1%) · $0.00  ctrl+p commands    ~/dotfiles:master'
+assert_state 'ignores a background counter outside the footer' waiting classify_state %9 opencode /dev/pts/9
+
 write_report opencode %9 123 working
 fresh_report=0
 assert_state 'does not trust a stale OpenCode working report' waiting classify_state %9 opencode /dev/pts/9
+capture='  ┃  Allow once   Allow always   Reject
+  ┃  enter confirm  esc dismiss'
+assert_state 'lets a blocking prompt outrank a stale working report' blocked classify_state %9 opencode /dev/pts/9
+capture='  ~/dotfiles:master   ↓ 1 shell · 12.4K (1%) · $0.00  ctrl+p commands'
+assert_state 'lets background work outrank a stale working report' working classify_state %9 opencode /dev/pts/9
 fresh_report=1
+capture='Build · GPT-5.6 Sol'
 assert_state 'trusts a fresh OpenCode working report' working classify_state %9 opencode /dev/pts/9
+capture='  ┃  Allow once   Allow always   Reject
+  ┃  enter confirm  esc dismiss'
+assert_state 'lets a blocking prompt outrank a fresh working report' blocked classify_state %9 opencode /dev/pts/9
 capture='esc to interrupt'
 
 mkdir -p "$TMUX_AGENT_STATUS_DIR/9"

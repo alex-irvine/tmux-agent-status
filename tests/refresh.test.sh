@@ -35,6 +35,13 @@ case "$1" in
     printf '%%9 opencode /dev/pts/9\n'
     [ -f "$FAKE_TMUX_STATE.multi" ] && printf '%%10 opencode /dev/pts/10\n'
     ;;
+  capture-pane)
+    if [ -n "${FAKE_TMUX_SCREEN:-}" ]; then
+      printf '%s\n' "$FAKE_TMUX_SCREEN"
+    else
+      printf '%s\n' '  ~/dotfiles:master   12.6K (1%) · $0.00  ctrl+p commands    ~/dotfiles:master'
+    fi
+    ;;
   set-option)
     printf '%s\n' "$*" >>"$FAKE_TMUX_LOG"
     ;;
@@ -241,6 +248,21 @@ write_report 9 blocked
 : >"$FAKE_TMUX_LOG"
 refresh
 [[ "$(window_state)" == blocked ]]
+write_report 9 working
+: >"$FAKE_TMUX_LOG"
+refresh
+[[ "$(window_state)" == working ]]
+
+# A fresh working report still yields to a blocking prompt on screen, because
+# background work keeps the report fresh across a prompt the report has not
+# caught up with.
+FAKE_TMUX_SCREEN='  ┃  Allow once   Allow always   Reject
+  ┃  enter confirm  esc dismiss'
+export FAKE_TMUX_SCREEN
+: >"$FAKE_TMUX_LOG"
+refresh
+[[ "$(window_state)" == blocked ]]
+unset FAKE_TMUX_SCREEN
 write_report 9 working
 : >"$FAKE_TMUX_LOG"
 refresh

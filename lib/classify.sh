@@ -182,13 +182,20 @@ reported_state() {
 #   blocked  — a numbered selection menu "❯ 1. Yes" (permission / plan prompts)
 #   waiting  — agent is at its prompt, nothing running and nothing to approve
 classify_status() {
-  local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported report bottom
+  local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported report bottom reported_working_fresh=0
   if reported="$(reported_status "$pane_id" "$agent" "$pane_tty")"; then
-    report="$(agent_status_report_root)/${pane_id#%}/$agent/report"
-    if [ "$agent" != opencode ] || [ "${reported%% *}" != working ] ||
-       agent_status_report_fresh "$report"; then
+    if [ "$agent" != opencode ] || [ "${reported%% *}" != working ]; then
       echo "$reported"
       return
+    fi
+    # The report says working. OpenCode keeps that true across background work
+    # (shells, subagents) and across ask cards the report has not caught up
+    # with, so working reports always consult the screen: it can upgrade to
+    # blocked, and it replaces a stale report (older than the freshness window)
+    # so a dead reporter cannot pin the badge to working.
+    report="$(agent_status_report_root)/${pane_id#%}/$agent/report"
+    if agent_status_report_fresh "$report"; then
+      reported_working_fresh=1
     fi
   fi
   buf="$(tmux capture-pane -p -t "$pane_id" 2>/dev/null)"
@@ -198,14 +205,22 @@ classify_status() {
       # State hints live in the input/status area at the foot of the pane:
       # "esc interrupt" shares the status line while running; ask/forms cards
       # end their footer with "esc dismiss" (permissions: "enter confirm  esc
-      # reject|cancel", options Allow once/Always allow). Match only those
-      # bottom lines so transcript text can never fake a state.
+      # reject|cancel", options Allow once/Always allow); the status line counts
+      # in-flight background work ("↓ 1 shell", "↓ 2 subagents") while the turn
+      # itself is idle. Match only those bottom lines so transcript text can
+      # never fake a state.
       bottom="$(printf '%s\n' "$buf" | tail -n 5)"
       if printf '%s\n' "$bottom" | grep -qE 'esc[[:space:]]+interrupt'; then
         echo 'working -'; return
       fi
       if printf '%s\n' "$bottom" | grep -qE 'Permission required|Allow once|Always allow|Allow always|enter[[:space:]]+confirm|esc[[:space:]]+dismiss'; then
         echo 'blocked -'; return
+      fi
+      if [ "$reported_working_fresh" = 1 ]; then
+        echo "$reported"; return
+      fi
+      if printf '%s\n' "$bottom" | grep -qE '↓[[:space:]]*[0-9]+[[:space:]]+(subagents?|shells?)'; then
+        echo 'working -'; return
       fi
       echo 'waiting -'; return
       ;;

@@ -22,7 +22,7 @@ color; the bracketed label is what gets tinted.)
 
 | Label       | Colour | State   | Meaning                                            |
 |-------------|--------|---------|----------------------------------------------------|
-| `(working)` | yellow | working | actively running (live spinner / "esc to interrupt") |
+| `(working)` | yellow | working | actively running (live spinner / "esc to interrupt" / background shells or subagents in flight) |
 | `(blocked)` | red    | blocked | a prompt is waiting on you (e.g. `❯ 1. Yes`)       |
 | `(done)`    | blue   | done    | finished since you last looked (working → idle)    |
 | `(idle)`    | green  | idle    | at the prompt, and you've seen it                  |
@@ -32,11 +32,15 @@ session is attached and the window is active), so `(done)` highlights "an agent
 finished while you were away." The transition is tracked in a tiny per-pane
 cache under `$XDG_CACHE_HOME/tmux-agent-status/state`.
 
-Status detection has screen markers for **Claude Code**. Agent lifecycle
-integrations can also provide the standard semantic report described below;
-Claude Code and OpenCode integrations can use this capability. Other agents
-still get a presence badge (their icon, no status label) until they provide a
-report or screen markers are added.
+Status detection has screen markers for **Claude Code** and **OpenCode**.
+OpenCode markers are matched only in the pane's footer lines: "esc interrupt"
+while a turn runs, ask/permission card footers for blocked, and the status
+line's in-flight task counter ("↓ 1 shell", "↓ 2 subagents") for background
+work that outlives the turn. Agent lifecycle integrations can also provide the
+standard semantic report described below; Claude Code and OpenCode
+integrations can use this capability. Other agents still get a presence badge
+(their icon, no status label) until they provide a report or screen markers are
+added.
 
 > The state taxonomy and colours are adapted from
 > [herdr](https://github.com/ogulcancelik/herdr) (an AGPL project) — concept
