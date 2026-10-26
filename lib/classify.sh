@@ -172,11 +172,33 @@ reported_state() {
   printf '%s\n' "${status%% *}"
 }
 
+# codex_screen_state <screen> -> working | blocked | waiting
+#
+# Codex keeps its composer and footer on the last lines of the pane. While a
+# turn runs, a status line "Working (7s • esc to interrupt)" sits just above the
+# composer; its label becomes the model's reasoning header ("Inspecting hooks
+# (1m 05s • esc to interrupt)"). Approvals replace the composer and end with
+# "Press enter to confirm or esc to cancel"; questions end with "enter to submit
+# answer | esc to interrupt" and show no timer. Match only those bottom lines so
+# transcript text can never fake a state.
+codex_screen_state() {
+  local foot
+  foot="$(printf '%s\n' "$1" | awk 'NF' | tail -n 10)"
+  if printf '%s\n' "$foot" | tail -n 3 |
+     grep -qE 'Press[[:space:]]+enter[[:space:]]+to[[:space:]]+confirm|enter[[:space:]]+to[[:space:]]+submit[[:space:]]+answer'; then
+    echo blocked
+  elif printf '%s\n' "$foot" | grep -qE '\(([0-9]+[hms][[:space:]]*)+•[[:space:]]*esc to interrupt\)'; then
+    echo working
+  else
+    echo waiting
+  fi
+}
+
 # classify_status <pane_id> <agent> <pane_tty> -> "<state> <run-token>"
 #
-# Reads the pane's visible screen and matches the Claude Code and OpenCode TUIs.
-# Other agents return "unknown" (the window still shows the agent icon, just no
-# status dot). Claude markers, from real output:
+# Reads the pane's visible screen and matches the Claude Code, OpenCode, and
+# Codex TUIs. Other agents return "unknown" (the window still shows the agent
+# icon, just no status dot). Claude markers, from real output:
 #   working  — live spinner "Tempering… (14s · ↓ 607 tokens)" or "esc to interrupt"
 #              (note: a *completed* "✻ Brewed for 20m 22s" line has no "… (" timer)
 #   blocked  — a numbered selection menu "❯ 1. Yes" (permission / plan prompts)
@@ -184,6 +206,17 @@ reported_state() {
 classify_status() {
   local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported report bottom reported_working_fresh=0
   if reported="$(reported_status "$pane_id" "$agent" "$pane_tty")"; then
+    if [ "$agent" = codex ] && [ "${reported%% *}" = working ]; then
+      # Codex fires no hook when it asks the user a question, so a working
+      # report yields to a blocking prompt on screen.
+      buf="$(tmux capture-pane -p -t "$pane_id" 2>/dev/null)"
+      if [ "$(codex_screen_state "$buf")" = blocked ]; then
+        echo "blocked ${reported#* }"
+      else
+        echo "$reported"
+      fi
+      return
+    fi
     if [ "$agent" != opencode ] || [ "${reported%% *}" != working ]; then
       echo "$reported"
       return
@@ -224,6 +257,7 @@ classify_status() {
       fi
       echo 'waiting -'; return
       ;;
+    codex) echo "$(codex_screen_state "$buf") -"; return ;;
     claude) ;;
     *) echo 'unknown -'; return ;;
   esac

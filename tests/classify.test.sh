@@ -232,6 +232,79 @@ assert_state 'trusts a fresh OpenCode working report' working classify_state %9 
 capture='  ┃  Allow once   Allow always   Reject
   ┃  enter confirm  esc dismiss'
 assert_state 'lets a blocking prompt outrank a fresh working report' blocked classify_state %9 opencode /dev/pts/9
+remove_reports
+codex_footer='› Ask Codex to do anything
+
+  Context 97% left · weekly 98% left · 25.3K used · GPT-6.1-Sol default
+  ? for shortcuts'
+codex_idle="  >_ OpenAI Codex (v0.163.0)
+     ~/Proj/PrimaVeraWS
+
+
+
+$codex_footer"
+codex_question='  Question 1/1 (1 unanswered)
+  Should the probe button be blue or green?
+
+  › 1. Blue (Recommended)  Use blue for the probe button.
+    2. Green               Use green for the probe button.
+    3. None of the above   Optionally, add details in notes (tab)
+
+  tab to add notes | enter to submit answer | esc to interrupt'
+
+capture="$codex_idle"
+assert_state 'detects Codex waiting without a report' waiting classify_state %9 codex /dev/pts/9
+capture="› Run the shell command once.
+
+• I will run the command once.
+
+Working (7s • esc to interrupt)
+  └ Tip: Use /agents to open the agent command center.
+
+
+$codex_footer"
+assert_state 'detects Codex working without a report' working classify_state %9 codex /dev/pts/9
+capture="Inspecting hooks.json (1m 05s • esc to interrupt)
+
+$codex_footer"
+assert_state 'detects Codex working under a reasoning header' working classify_state %9 codex /dev/pts/9
+capture='• Running touch /tmp/marker
+
+  Would you like to run the following command?
+
+  $ touch /tmp/marker
+
+› 1. Yes, proceed (y)
+  2. Yes, and do not ask again for commands that start with `touch /tmp/marker` (p)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel'
+assert_state 'detects a Codex approval as blocked' blocked classify_state %9 codex /dev/pts/9
+capture="$codex_question"
+assert_state 'detects a Codex question as blocked, not working' blocked classify_state %9 codex /dev/pts/9
+capture="• The status line reads Working (7s • esc to interrupt) while a turn runs.
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+$codex_footer"
+assert_state 'ignores a Codex working marker outside the footer' waiting classify_state %9 codex /dev/pts/9
+capture="• Approvals end with: Press enter to confirm or esc to cancel
+
+$codex_footer"
+assert_state 'ignores a Codex approval footer quoted in the transcript' waiting classify_state %9 codex /dev/pts/9
+
+write_report codex %9 123 working
+capture="$codex_idle"
+assert_state 'trusts a Codex working report' working classify_state %9 codex /dev/pts/9
+capture="$codex_question"
+assert_state 'lets a Codex question outrank a working report' \
+  "blocked $(agent_status_encode test-run)" classify_status %9 codex /dev/pts/9
+remove_reports
 capture='esc to interrupt'
 
 mkdir -p "$TMUX_AGENT_STATUS_DIR/9"

@@ -32,13 +32,18 @@ session is attached and the window is active), so `(done)` highlights "an agent
 finished while you were away." The transition is tracked in a tiny per-pane
 cache under `$XDG_CACHE_HOME/tmux-agent-status/state`.
 
-Status detection has screen markers for **Claude Code** and **OpenCode**.
-OpenCode markers are matched only in the pane's footer lines: "esc interrupt"
-while a turn runs, ask/permission card footers for blocked, and the status
-line's in-flight task counter ("↓ 1 shell", "↓ 2 subagents") for background
-work that outlives the turn. Agent lifecycle integrations can also provide the
-standard semantic report described below; Claude Code and OpenCode
-integrations can use this capability. Other agents still get a presence badge
+Status detection has screen markers for **Claude Code**, **OpenCode**, and
+**Codex**. OpenCode markers are matched only in the pane's footer lines: "esc
+interrupt" while a turn runs, ask/permission card footers for blocked, and the
+status line's in-flight task counter ("↓ 1 shell", "↓ 2 subagents") for
+background work that outlives the turn. Codex markers are matched only above
+its composer and footer: the timed status line ("Working (7s • esc to
+interrupt)") while a turn runs, and the approval ("Press enter to confirm or esc
+to cancel") or question ("enter to submit answer") footer for blocked. Agent
+lifecycle integrations can also provide the standard semantic report described
+below; Claude Code, OpenCode, and Codex integrations can use this capability.
+Codex asks questions without a lifecycle event, so a Codex working report still
+yields to a question on screen. Other agents still get a presence badge
 (their icon, no status label) until they provide a report or screen markers are
 added.
 
@@ -150,9 +155,10 @@ state=working
 `source` is the detected agent name and `state` is `working`, `blocked`, or
 `waiting`. Reports are parsed strictly as data, and are accepted only while the
 owner process is alive on the pane's tty. A valid semantic report takes
-precedence over screen markers. If the report is absent or invalid, detection
-preserves the existing Claude screen fallback and presence-only behavior for
-other agents.
+precedence over screen markers, except that OpenCode and Codex working reports
+still let a blocking prompt on screen win. If the report is absent or invalid,
+detection uses the Claude, OpenCode, and Codex screen markers, and
+presence-only behavior for other agents.
 
 Working-transition markers live at
 `${TMUX_AGENT_STATUS_DIR}/<pane-number>/.edges/<source>/pending-working.<generation>`.
