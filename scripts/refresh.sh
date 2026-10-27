@@ -78,12 +78,9 @@ acquire_refresh_lock || exit 1
 trap cleanup_refresh_lock EXIT
 trap 'exit 1' INT TERM
 
-# Cold start (no prior cache) → don't notify, or we'd alert for every existing
-# blocked/done agent the moment the daemon launches.
-NO_NOTIFY=0
-[ -f "$CACHE" ] || NO_NOTIFY=1
-: > "$NEW"
-: > "$CONSUMED"
+SERVER_ID="$(tmux display-message -p '#{pid}' 2>/dev/null)"
+case "$SERVER_ID" in ''|*[!0-9]*) SERVER_ID=default ;; esac
+NOTIFICATIONS="$CACHE_DIR/notifications/$SERVER_ID"
 
 GLOBAL_ICON="$(tmux_opt @agent_status_icon 🤖)"
 RENAME="$(tmux_opt @agent_status_rename off)"
@@ -165,20 +162,61 @@ play_sound_linux() { # play_sound_linux <theme-id|/path/to/file>
   return 0
 }
 
-# notify <title> <message> [kind]   kind = done | blocked
+# Close only notifications belonging to the window that gained focus. Share
+# the refresh lock so focus cannot overtake delivery and lose its returned ID.
+dismiss_notifications() {
+  local window_id="$1" dir record backend identity
+  [[ "$window_id" =~ ^@[0-9]+$ ]] || return 0
+  tmux list-clients -F '#{window_id}' 2>/dev/null | grep -Fxq -- "$window_id" || return 0
+  dir="$NOTIFICATIONS/${window_id#@}"
+  for record in "$dir"/*; do
+    [ -f "$record" ] || continue
+    read -r backend identity <"$record" || continue
+    case "$backend" in
+      notify-send)
+        case "$identity" in ''|*[!0-9]*) continue ;; esac
+        linux_session_env
+        if command -v gdbus >/dev/null 2>&1; then
+          gdbus call --session --dest org.freedesktop.Notifications \
+            --object-path /org/freedesktop/Notifications \
+            --method org.freedesktop.Notifications.CloseNotification "$identity" >/dev/null 2>&1 || continue
+        elif command -v dbus-send >/dev/null 2>&1; then
+          dbus-send --session --type=method_call --print-reply \
+            --dest=org.freedesktop.Notifications /org/freedesktop/Notifications \
+            org.freedesktop.Notifications.CloseNotification "uint32:$identity" >/dev/null 2>&1 || continue
+        else
+          continue
+        fi
+        ;;
+      terminal-notifier)
+        terminal-notifier -remove "$identity" >/dev/null 2>&1 || continue
+        ;;
+      *) continue ;;
+    esac
+    rm -f "$record"
+  done
+  rmdir "$dir" 2>/dev/null || true
+}
+
+# notify <title> <message> <kind> <window_id> <pane_id>   kind = done | blocked
 # Delivery is by the notification system in your GUI session (not this
 # process), so it works from inside tmux where audio may not be reachable.
 # On Linux a "blocked" notification is sent with critical urgency so it stays
 # on screen until dismissed; "done" is normal urgency.
 notify() {
-  local title msg kind="${3:-done}" urgency=normal backend
+  local title msg kind="$3" urgency=normal backend record group identity previous_backend replace_id=0
+  record="$NOTIFICATIONS/${4#@}/${5#%}"
+  group="tmux-agent-status-$SERVER_ID-${4#@}-${5#%}"
   title="$(printf '%s' "$1" | tr -d '"\\')"
   msg="$(printf '%s' "$2" | tr -d '"\\')"
   printf '%s  %s | %s\n' "$(date '+%H:%M:%S')" "$title" "$msg" >> "$CACHE_DIR/notify.log" 2>/dev/null
   backend="$(notify_backend)"
   case "$backend" in
     terminal-notifier)
-      terminal-notifier -title "$title" -message "$msg" ${SOUND:+-sound "$SOUND"} >/dev/null 2>&1 &
+      if terminal-notifier -group "$group" -title "$title" -message "$msg" ${SOUND:+-sound "$SOUND"} >/dev/null 2>&1; then
+        mkdir -p "${record%/*}"
+        printf 'terminal-notifier %s\n' "$group" >"$record"
+      fi
       ;;
     osascript)
       local sound_clause=""
@@ -188,9 +226,18 @@ notify() {
     notify-send)
       linux_session_env
       [ "$kind" = blocked ] && urgency=critical
-      notify-send -a tmux-agent-status -i utilities-terminal -u "$urgency" \
-        -h string:x-canonical-private-synchronous:tmux-agent-status \
-        "$title" "$msg" >/dev/null 2>&1 &
+      if [ -f "$record" ] && read -r previous_backend identity <"$record"; then
+        if [ "$previous_backend" = notify-send ]; then
+          case "$identity" in ''|*[!0-9]*) ;; *) replace_id="$identity" ;; esac
+        fi
+      fi
+      if identity="$(notify-send -p -r "$replace_id" -a tmux-agent-status -i utilities-terminal -u "$urgency" \
+        -h "string:x-canonical-private-synchronous:$group" "$title" "$msg" 2>/dev/null)"; then
+        case "$identity" in
+          ''|*[!0-9]*) ;;
+          *) mkdir -p "${record%/*}"; printf 'notify-send %s\n' "$identity" >"$record" ;;
+        esac
+      fi
       play_sound_linux "$SOUND"
       ;;
     *) ;;
@@ -198,6 +245,18 @@ notify() {
 }
 
 SOUND="$(tmux_opt @agent_status_sound "$(default_sound)")"  # empty = silent
+
+if [ "${1:-}" = --dismiss-window ]; then
+  dismiss_notifications "${2:-}"
+  exit 0
+fi
+
+# Cold start (no prior cache) → don't notify, or we'd alert for every existing
+# blocked/done agent the moment the daemon launches.
+NO_NOTIFY=0
+[ -f "$CACHE" ] || NO_NOTIFY=1
+: > "$NEW"
+: > "$CONSUMED"
 
 # Cache columns: "<pane_id> <display_state> <raw_state> <run-token>"
 prev_disp() { [ -f "$CACHE" ] && awk -v p="$1" '$1==p {print $2; exit}' "$CACHE"; }
@@ -293,9 +352,9 @@ while read -r window_id window_active session_attached session_name window_index
     # Notify on the raw transition — independent of which window you're viewing.
     if [ "$NO_NOTIFY" = 0 ]; then
       if [ "$raw" = "waiting" ] && [ "$praw" = "working" ] && should_notify done; then
-        notify "🤖 $agent finished" "$window_name — $session_name" done
+        notify "🤖 $agent finished" "$window_name — $session_name" done "$window_id" "$pane_id"
       elif [ "$raw" = "blocked" ] && [ "$praw" != "blocked" ] && should_notify blocked; then
-        notify "🤖 $agent needs you" "$window_name — $session_name" blocked
+        notify "🤖 $agent needs you" "$window_name — $session_name" blocked "$window_id" "$pane_id"
       fi
     fi
 

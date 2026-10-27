@@ -70,6 +70,13 @@ if [ "$(opt @agent_status_statusbar on)" != "off" ]; then
 fi
 
 # --- 3. Background poller -----------------------------------------------------
+# A fixed hook array slot makes reloads idempotent and preserves other hooks.
+# Window IDs stay valid across renames and window-number changes.
+tmux set-option -g focus-events on
+for hook in session-window-changed client-session-changed client-attached client-focus-in; do
+  tmux set-hook -g "${hook}[100]" "run-shell -b '\"$REFRESH\" --dismiss-window \"#{window_id}\"'"
+done
+
 if [ "$POLL" != "off" ]; then
   tmux run-shell -b "$DAEMON"
 fi

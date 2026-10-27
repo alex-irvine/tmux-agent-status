@@ -65,6 +65,13 @@ A small background poller (`scripts/daemon.sh`) re-scans every few seconds, so:
 The poller is single-instance (a reload cleanly replaces it) and exits when the
 tmux server stops.
 
+Notifications clear when you focus their tmux window: switching windows,
+switching sessions, attaching a client, or returning focus to the terminal.
+This clears notifications from every pane in that window and leaves other
+windows' notifications alone. Repeated notifications from one pane replace
+its previous banner. The plugin enables tmux's `focus-events` option to detect
+terminal focus changes.
+
 With polling enabled (the default), the chooser opens immediately from cached
 event/poller state. The daemon normally refreshes after each
 `@agent_status_interval` sleep (three seconds by default), plus scan and
@@ -104,6 +111,9 @@ until you deal with it; **done** is normal urgency. If the tmux server was
 started without `DBUS_SESSION_BUS_ADDRESS` (systemd unit, ssh), the plugin
 falls back to the per-user bus at `$XDG_RUNTIME_DIR/bus`.
 
+Automatic dismissal uses `gdbus` or `dbus-send` to close the notification by
+its ID. It works with any freedesktop notification daemon, including Mako.
+
 `@agent_status_sound` is a freedesktop sound-theme id (default
 `message-new-instant`), played through libcanberra (`canberra-gtk-play`), or a
 file path played through `pw-play` / `paplay`. Set it to `""` for silent banners.
@@ -127,6 +137,8 @@ Editor" and are **silently dropped if that host isn't allowed** in System
 Settings → Notifications → "Script Editor" → Allow Notifications (it appears
 there after the first attempt); also disable Focus / Do Not Disturb.
 `@agent_status_sound` is a Notification Center sound name (default `Glass`).
+Automatic dismissal requires `terminal-notifier`; the `osascript` fallback
+cannot remove delivered notifications.
 
 ## How detection works
 
