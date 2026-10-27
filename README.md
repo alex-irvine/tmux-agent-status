@@ -10,6 +10,7 @@ label, colored by state — to windows that have one:
 ```
 🤖 (working) 1: api      ← label in yellow
 🤖 (blocked) 2: build    ← label in red — needs your input
+🤖 (shell)   6: deploy   ← label in cyan — at the prompt, a background shell still running
 🤖 (done)    3: worker   ← label in blue — finished, you haven't looked yet
 🤖 (idle)    4: notes    ← label in green — finished and seen
              5: shell    ← no agent (plain shell)
@@ -22,8 +23,9 @@ color; the bracketed label is what gets tinted.)
 
 | Label       | Colour | State   | Meaning                                            |
 |-------------|--------|---------|----------------------------------------------------|
-| `(working)` | yellow | working | actively running (live spinner / "esc to interrupt" / background shells or subagents in flight) |
+| `(working)` | yellow | working | actively running (live spinner / "esc to interrupt" / background subagents in flight) |
 | `(blocked)` | red    | blocked | a prompt is waiting on you (e.g. `❯ 1. Yes`)       |
+| `(shell)`   | cyan   | shell   | at the prompt while a background shell it started is still running |
 | `(done)`    | blue   | done    | finished since you last looked (working → idle)    |
 | `(idle)`    | green  | idle    | at the prompt, and you've seen it                  |
 
@@ -35,8 +37,9 @@ cache under `$XDG_CACHE_HOME/tmux-agent-status/state`.
 Status detection has screen markers for **Claude Code**, **OpenCode**, and
 **Codex**. OpenCode markers are matched only in the pane's footer lines: "esc
 interrupt" while a turn runs, ask/permission card footers for blocked, and the
-status line's in-flight task counter ("↓ 1 shell", "↓ 2 subagents") for
-background work that outlives the turn. Codex markers are matched only above
+status line's in-flight task counter for background work that outlives the
+turn: any subagent ("↓ 1 subagent · 2 shells") is working, shells alone
+("↓ 2 shells") are shell. Codex markers are matched only above
 its composer and footer: the timed status line ("Working (7s • esc to
 interrupt)") while a turn runs, and the approval ("Press enter to confirm or esc
 to cancel") or question ("enter to submit answer") footer for blocked. Agent
@@ -164,11 +167,15 @@ pane=%9
 state=working
 ```
 
-`source` is the detected agent name and `state` is `working`, `blocked`, or
-`waiting`. Reports are parsed strictly as data, and are accepted only while the
+`source` is the detected agent name and `state` is `working`, `blocked`,
+`shell` (only background shells are running), or `waiting`. Reports are parsed strictly as data, and are accepted only while the
 owner process is alive on the pane's tty. A valid semantic report takes
 precedence over screen markers, except that OpenCode and Codex working reports
-still let a blocking prompt on screen win. If the report is absent or invalid,
+still let a blocking prompt on screen win, and a Claude waiting report counts
+as shell while Claude's session record
+(`${CLAUDE_CONFIG_DIR:-~/.claude}/sessions/<owner>.json`) has status `shell`,
+because Claude fires no hook when a background shell exits. If the report is
+absent or invalid,
 detection uses the Claude, OpenCode, and Codex screen markers, and
 presence-only behavior for other agents.
 
@@ -284,12 +291,14 @@ different icon per agent. Set `@agent_status_icon ""` for label-only badges
 # Bracketed label text per state
 set -g @agent_status_label_working working
 set -g @agent_status_label_blocked blocked
+set -g @agent_status_label_shell   shell
 set -g @agent_status_label_done    done
 set -g @agent_status_label_idle    idle
 
 # Colour per state (any tmux colour: named, colourNNN, or #RRGGBB)
 set -g @agent_status_color_working yellow
 set -g @agent_status_color_blocked red
+set -g @agent_status_color_shell   cyan
 set -g @agent_status_color_done    blue
 set -g @agent_status_color_idle    green
 ```

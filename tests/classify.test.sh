@@ -3,8 +3,9 @@ set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMUX_AGENT_STATUS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tmux-agent-status-test.XXXXXX")"
-export TMUX_AGENT_STATUS_DIR
-trap 'rm -rf "$TMUX_AGENT_STATUS_DIR"' EXIT
+CLAUDE_CONFIG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tmux-agent-status-claude.XXXXXX")"
+export TMUX_AGENT_STATUS_DIR CLAUDE_CONFIG_DIR
+trap 'rm -rf "$TMUX_AGENT_STATUS_DIR" "$CLAUDE_CONFIG_DIR"' EXIT
 
 . "$ROOT/lib/classify.sh"
 
@@ -94,6 +95,18 @@ write_report claude %9 123 blocked
 assert_state 'accepts a valid Claude report' blocked reported_state %9 claude /dev/pts/9
 assert_state 'semantic state takes precedence over Claude screen markers' blocked classify_state %9 claude /dev/pts/9
 
+mkdir -p "$CLAUDE_CONFIG_DIR/sessions"
+printf '{"pid":123,"sessionId":"test-run","status":"shell","statusUpdatedAt":1}\n' >"$CLAUDE_CONFIG_DIR/sessions/123.json"
+assert_state 'keeps a blocked Claude report while a background shell runs' blocked classify_state %9 claude /dev/pts/9
+write_report claude %9 123 working
+assert_state 'keeps a working Claude turn as working while a background shell runs' working classify_state %9 claude /dev/pts/9
+write_report claude %9 123 waiting
+assert_state 'shows a Claude background shell after the turn ends' shell classify_state %9 claude /dev/pts/9
+printf '{"pid":123,"sessionId":"test-run","status":"idle","statusUpdatedAt":2}\n' >"$CLAUDE_CONFIG_DIR/sessions/123.json"
+assert_state 'returns to waiting once the Claude background shell exits' waiting classify_state %9 claude /dev/pts/9
+rm -f "$CLAUDE_CONFIG_DIR/sessions/123.json"
+assert_state 'keeps a waiting Claude report without a session record' waiting classify_state %9 claude /dev/pts/9
+
 remove_reports
 write_report claude %9 123 working
 printf 'version=1\nsource=opencode\nrun=test-run\nowner=123\npane=%%9\nstate=working\n' >"$TMUX_AGENT_STATUS_DIR/9/claude/report"
@@ -115,6 +128,12 @@ tty_owner=123
 
 write_report opencode %9 123 unknown
 assert_rejected 'rejects an unknown state' reported_state %9 opencode /dev/pts/9
+
+write_report opencode %9 123 shell
+assert_state 'accepts a background shell report' shell reported_state %9 opencode /dev/pts/9
+capture='  ~/dotfiles:master   ↓ 1 shell · 12.4K (1%) · $0.00  ctrl+p commands'
+assert_state 'uses a background shell report' shell classify_state %9 opencode /dev/pts/9
+capture='esc to interrupt'
 
 write_report opencode %9 123 working
 printf 'malformed\n' >>"$TMUX_AGENT_STATUS_DIR/9/opencode/report"
@@ -194,14 +213,17 @@ capture='  ┃
   ┃  Build · DeepSeek V4.1 Flash OpenRouter · max
   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
   ~/dotfiles:master   ↓ 1 shell · 12.4K (1%) · $0.00  ctrl+p commands    ~/dotfiles:master'
-assert_state 'detects a background shell in the status line as working' working classify_state %9 opencode /dev/pts/9
+assert_state 'detects a background shell in the status line' shell classify_state %9 opencode /dev/pts/9
 
 capture='  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
   ~/dotfiles:master   ↓ 1 subagent · 1 shell · 10.7K (1%) · $0.00  ctrl+p commands    ~/dotfiles:master'
 assert_state 'detects background subagents and shells as working' working classify_state %9 opencode /dev/pts/9
 
+capture='  ~/dotfiles:master   ↓ 2 shells · 1 subagent · 13.3K (1%) · $0.00  ctrl+p commands'
+assert_state 'detects a background subagent listed after shells as working' working classify_state %9 opencode /dev/pts/9
+
 capture='  ~/dotfiles:master   ↓ 2 shells · 13.3K (1%) · $0.00  ctrl+p commands'
-assert_state 'detects plural background shells as working' working classify_state %9 opencode /dev/pts/9
+assert_state 'detects plural background shells' shell classify_state %9 opencode /dev/pts/9
 
 capture='  ┃  Which colour should the new button be?
   ┃
@@ -225,7 +247,9 @@ capture='  ┃  Allow once   Allow always   Reject
   ┃  enter confirm  esc dismiss'
 assert_state 'lets a blocking prompt outrank a stale working report' blocked classify_state %9 opencode /dev/pts/9
 capture='  ~/dotfiles:master   ↓ 1 shell · 12.4K (1%) · $0.00  ctrl+p commands'
-assert_state 'lets background work outrank a stale working report' working classify_state %9 opencode /dev/pts/9
+assert_state 'lets a background shell outrank a stale working report' shell classify_state %9 opencode /dev/pts/9
+capture='  ~/dotfiles:master   ↓ 1 subagent · 12.4K (1%) · $0.00  ctrl+p commands'
+assert_state 'lets a background subagent outrank a stale working report' working classify_state %9 opencode /dev/pts/9
 fresh_report=1
 capture='Build · GPT-5.6 Sol'
 assert_state 'trusts a fresh OpenCode working report' working classify_state %9 opencode /dev/pts/9

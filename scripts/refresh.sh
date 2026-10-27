@@ -90,12 +90,14 @@ NOTIFY="$(tmux_opt @agent_status_notify 'done blocked')"   # states that notify
 # --- State -> bracketed label (colored by the chooser/status-bar format) -----
 L_WORKING="$(tmux_opt @agent_status_label_working working)"
 L_BLOCKED="$(tmux_opt @agent_status_label_blocked blocked)"
+L_SHELL="$(tmux_opt @agent_status_label_shell shell)"
 L_DONE="$(tmux_opt @agent_status_label_done done)"
 L_IDLE="$(tmux_opt @agent_status_label_idle idle)"
 status_label() {
   case "$1" in
     working) printf '%s' "$L_WORKING" ;;
     blocked) printf '%s' "$L_BLOCKED" ;;
+    shell)   printf '%s' "$L_SHELL" ;;
     done)    printf '%s' "$L_DONE" ;;
     idle)    printf '%s' "$L_IDLE" ;;
     *)       printf '' ;;
@@ -103,7 +105,7 @@ status_label() {
 }
 state_rank() {
   case "$1" in
-    blocked) echo 4 ;; working) echo 3 ;; done) echo 2 ;; idle) echo 1 ;; *) echo 0 ;;
+    blocked) echo 5 ;; working) echo 4 ;; shell) echo 3 ;; done) echo 2 ;; idle) echo 1 ;; *) echo 0 ;;
   esac
 }
 icon_for() {
@@ -269,6 +271,7 @@ display_state() {
   case "$raw" in
     working) echo working ;;
     blocked) echo blocked ;;
+    shell) echo shell ;;
     unknown) echo unknown ;;
     *) if [ "$seen" = "1" ]; then echo idle
        elif [ "$prev" = "working" ] || [ "$prev" = "done" ]; then echo done

@@ -160,7 +160,7 @@ reported_status() {
   [ "$source" = "$agent" ] || return 1
   [ "$pane" = "$pane_id" ] || return 1
   case "$owner" in ''|0|*[!0-9]*) return 1 ;; esac
-  case "$state" in working|blocked|waiting) ;; *) return 1 ;; esac
+  case "$state" in working|blocked|shell|waiting) ;; *) return 1 ;; esac
   agent_status_pid_alive "$owner" || return 1
   agent_status_pid_on_tty "$owner" "$pane_tty" || return 1
   printf '%s %s\n' "$state" "$(agent_status_encode "$run")"
@@ -170,6 +170,17 @@ reported_state() {
   local status
   status="$(reported_status "$@")" || return 1
   printf '%s\n' "${status%% *}"
+}
+
+# claude_session_status <pid> -> busy | shell | idle | waiting
+#
+# Claude Code records each interactive process's status in
+# <config dir>/sessions/<pid>.json. "shell" means the turn has ended while a
+# background shell is still running; no hook fires when that shell exits.
+claude_session_status() {
+  local record="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/$1.json"
+  [ -f "$record" ] || return 1
+  sed -n 's/.*"status":"\([a-z]*\)".*/\1/p' "$record"
 }
 
 # codex_screen_state <screen> -> working | blocked | waiting
@@ -203,9 +214,22 @@ codex_screen_state() {
 #              (note: a *completed* "✻ Brewed for 20m 22s" line has no "… (" timer)
 #   blocked  — a numbered selection menu "❯ 1. Yes" (permission / plan prompts)
 #   waiting  — agent is at its prompt, nothing running and nothing to approve
+# A shell state means the agent is at its prompt while a background shell it
+# started is still running; it comes from reports and OpenCode's footer.
 classify_status() {
-  local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported report bottom reported_working_fresh=0
+  local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported report owner bottom counter reported_working_fresh=0
   if reported="$(reported_status "$pane_id" "$agent" "$pane_tty")"; then
+    if [ "$agent" = claude ] && [ "${reported%% *}" = waiting ]; then
+      # Claude's Stop hook reports waiting while a background shell it started
+      # keeps running, and no hook marks that shell's exit. Claude's own
+      # session record for the report's owner says so instead.
+      report="$(agent_status_report_root)/${pane_id#%}/$agent/report"
+      owner="$(awk -F= '$1 == "owner" { print $2; exit }' "$report")"
+      if [ "$(claude_session_status "$owner")" = shell ]; then
+        echo "shell ${reported#* }"
+        return
+      fi
+    fi
     if [ "$agent" = codex ] && [ "${reported%% *}" = working ]; then
       # Codex fires no hook when it asks the user a question, so a working
       # report yields to a blocking prompt on screen.
@@ -221,9 +245,9 @@ classify_status() {
       echo "$reported"
       return
     fi
-    # The report says working. OpenCode keeps that true across background work
-    # (shells, subagents) and across ask cards the report has not caught up
-    # with, so working reports always consult the screen: it can upgrade to
+    # The report says working. OpenCode keeps that true across background
+    # subagents and across ask cards the report has not caught up with, so
+    # working reports always consult the screen: it can upgrade to
     # blocked, and it replaces a stale report (older than the freshness window)
     # so a dead reporter cannot pin the badge to working.
     report="$(agent_status_report_root)/${pane_id#%}/$agent/report"
@@ -239,9 +263,10 @@ classify_status() {
       # "esc interrupt" shares the status line while running; ask/forms cards
       # end their footer with "esc dismiss" (permissions: "enter confirm  esc
       # reject|cancel", options Allow once/Always allow); the status line counts
-      # in-flight background work ("↓ 1 shell", "↓ 2 subagents") while the turn
-      # itself is idle. Match only those bottom lines so transcript text can
-      # never fake a state.
+      # in-flight background work ("↓ 1 shell", "↓ 1 subagent · 2 shells")
+      # while the turn itself is idle. A subagent is work in progress; shells
+      # alone leave the agent at its prompt. Match only those bottom lines so
+      # transcript text can never fake a state.
       bottom="$(printf '%s\n' "$buf" | tail -n 5)"
       if printf '%s\n' "$bottom" | grep -qE 'esc[[:space:]]+interrupt'; then
         echo 'working -'; return
@@ -252,10 +277,15 @@ classify_status() {
       if [ "$reported_working_fresh" = 1 ]; then
         echo "$reported"; return
       fi
-      if printf '%s\n' "$bottom" | grep -qE '↓[[:space:]]*[0-9]+[[:space:]]+(subagents?|shells?)'; then
-        echo 'working -'; return
-      fi
-      echo 'waiting -'; return
+      counter="$(printf '%s\n' "$bottom" |
+        grep -oE '↓[[:space:]]*[0-9]+[[:space:]]+(subagents?|shells?)([[:space:]]*·[[:space:]]*[0-9]+[[:space:]]+(subagents?|shells?))*' |
+        tail -n 1)"
+      case "$counter" in
+        *subagent*) echo 'working -' ;;
+        *shell*) echo 'shell -' ;;
+        *) echo 'waiting -' ;;
+      esac
+      return
       ;;
     codex) echo "$(codex_screen_state "$buf") -"; return ;;
     claude) ;;

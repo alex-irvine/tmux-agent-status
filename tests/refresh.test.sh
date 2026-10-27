@@ -268,6 +268,19 @@ write_report 9 working
 refresh
 [[ "$(window_state)" == working ]]
 
+write_report 9 shell
+: >"$FAKE_TMUX_LOG"
+refresh
+[[ "$(window_state)" == shell ]]
+grep -q '@agent_status_text (shell) ' "$FAKE_TMUX_LOG"
+
+write_report 9 shell
+write_report 10 working
+: >"$FAKE_TMUX_STATE.multi"
+: >"$FAKE_TMUX_LOG"
+refresh
+[[ "$(window_state)" == working ]]
+
 write_report 9 working
 write_report 10 blocked
 : >"$FAKE_TMUX_STATE.multi"
@@ -306,6 +319,16 @@ write_report 9 blocked
 refresh
 sleep 0.1
 grep -q '^notify-send .*-u critical .*opencode needs you' "$NOTIFY_LOG"
+write_report 9 working
+refresh
+: >"$NOTIFY_LOG"
+write_report 9 shell
+refresh
+sleep 0.1
+if [ -s "$NOTIFY_LOG" ]; then
+  echo "FAIL: a turn that left a background shell running notified" >&2
+  exit 1
+fi
 rm -f "$TMP/bin/uname" "$TMP/bin/notify-send" "$TMP/bin/canberra-gtk-play"
 
 echo "PASS: tmux refresh tests"

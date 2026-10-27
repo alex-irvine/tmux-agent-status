@@ -27,13 +27,14 @@ POLL="$(opt @agent_status_poll on)"
 # State -> colour (any tmux colour: named, colourNNN, or #RRGGBB).
 CW="$(opt @agent_status_color_working yellow)"
 CB="$(opt @agent_status_color_blocked red)"
+CS="$(opt @agent_status_color_shell cyan)"
 CD="$(opt @agent_status_color_done blue)"
 CI="$(opt @agent_status_color_idle green)"
 
 # Nested conditional resolving @agent_status_state -> colour. tmux expands the
 # inner #{...} before the #[fg=...] style is applied at draw time.
 S='#{@agent_status_state}'
-COLOR="#{?#{==:$S,working},$CW,#{?#{==:$S,blocked},$CB,#{?#{==:$S,done},$CD,#{?#{==:$S,idle},$CI,default}}}}"
+COLOR="#{?#{==:$S,working},$CW,#{?#{==:$S,blocked},$CB,#{?#{==:$S,shell},$CS,#{?#{==:$S,done},$CD,#{?#{==:$S,idle},$CI,default}}}}}"
 
 # Chooser always shows icon + label; the status bar can hide the icon (label
 # only) via @agent_status_statusbar_icon off.
