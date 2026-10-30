@@ -46,7 +46,9 @@ to cancel") or question ("enter to submit answer") footer for blocked. Agent
 lifecycle integrations can also provide the standard semantic report described
 below; Claude Code, OpenCode, and Codex integrations can use this capability.
 Codex asks questions without a lifecycle event, so a Codex working report still
-yields to a question on screen. Other agents still get a presence badge
+yields to a question on screen. An approval can leave its report blocked until
+the approved command finishes; the live screen clears that stale block when
+work resumes or ends. Other agents still get a presence badge
 (their icon, no status label) until they provide a report or screen markers are
 added.
 
@@ -171,7 +173,8 @@ state=working
 `shell` (only background shells are running), or `waiting`. Reports are parsed strictly as data, and are accepted only while the
 owner process is alive on the pane's tty. A valid semantic report takes
 precedence over screen markers, except that OpenCode and Codex working reports
-still let a blocking prompt on screen win, and a Claude waiting report counts
+still let a blocking prompt on screen win, Codex blocked reports follow the live
+screen after the prompt closes, and a Claude waiting report counts
 as shell while Claude's session record
 (`${CLAUDE_CONFIG_DIR:-~/.claude}/sessions/<owner>.json`) has status `shell`,
 because Claude fires no hook when a background shell exits. If the report is

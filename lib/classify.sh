@@ -217,7 +217,7 @@ codex_screen_state() {
 # A shell state means the agent is at its prompt while a background shell it
 # started is still running; it comes from reports and OpenCode's footer.
 classify_status() {
-  local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported report owner bottom counter reported_working_fresh=0
+  local pane_id="$1" agent="$2" pane_tty="${3:-}" buf reported report owner bottom counter screen_state reported_working_fresh=0
   if reported="$(reported_status "$pane_id" "$agent" "$pane_tty")"; then
     if [ "$agent" = claude ] && [ "${reported%% *}" = waiting ]; then
       # Claude's Stop hook reports waiting while a background shell it started
@@ -230,15 +230,20 @@ classify_status() {
         return
       fi
     fi
-    if [ "$agent" = codex ] && [ "${reported%% *}" = working ]; then
-      # Codex fires no hook when it asks the user a question, so a working
-      # report yields to a blocking prompt on screen.
-      buf="$(tmux capture-pane -p -t "$pane_id" 2>/dev/null)"
-      if [ "$(codex_screen_state "$buf")" = blocked ]; then
-        echo "blocked ${reported#* }"
-      else
-        echo "$reported"
+    if [ "$agent" = codex ] && {
+      [ "${reported%% *}" = working ] || [ "${reported%% *}" = blocked ];
+    }; then
+      # Questions may have no hook, and an approved command can keep its
+      # blocked report until it finishes. Reconcile both with the live screen.
+      buf="$(tmux capture-pane -p -t "$pane_id" 2>/dev/null)" || buf=
+      if [ -n "$buf" ]; then
+        screen_state="$(codex_screen_state "$buf")"
+        if [ "$screen_state" = blocked ] || [ "${reported%% *}" = blocked ]; then
+          echo "$screen_state ${reported#* }"
+          return
+        fi
       fi
+      echo "$reported"
       return
     fi
     if [ "$agent" != opencode ] || [ "${reported%% *}" != working ]; then
