@@ -42,7 +42,8 @@ turn: any subagent ("↓ 1 subagent · 2 shells") is working, shells alone
 ("↓ 2 shells") are shell. Codex markers are matched only above
 its composer and footer: the timed status line ("Working (7s • esc to
 interrupt)") while a turn runs, and the approval ("Press enter to confirm or esc
-to cancel") or question ("enter to submit answer") footer for blocked. Agent
+to cancel") or question ("enter to submit answer") footer for blocked, and
+"1 background terminal running · /ps to view · /stop to close" for shell. Agent
 lifecycle integrations can also provide the standard semantic report described
 below; Claude Code, OpenCode, and Codex integrations can use this capability.
 Codex asks questions without a lifecycle event, so a Codex working report still
@@ -174,7 +175,8 @@ state=working
 owner process is alive on the pane's tty. A valid semantic report takes
 precedence over screen markers, except that OpenCode and Codex working reports
 still let a blocking prompt on screen win, Codex blocked reports follow the live
-screen after the prompt closes, and a Claude waiting report counts
+screen after the prompt closes, Codex waiting reports show shell while the
+footer lists background terminals, and a Claude waiting report counts
 as shell while Claude's session record
 (`${CLAUDE_CONFIG_DIR:-~/.claude}/sessions/<owner>.json`) has status `shell`,
 because Claude fires no hook when a background shell exits. If the report is

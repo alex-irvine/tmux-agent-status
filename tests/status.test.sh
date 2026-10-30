@@ -32,6 +32,10 @@ exec -a codex bash --noprofile --norc -c '
       working) printf "Working (7s • esc to interrupt)\n\n› Ask Codex to do anything\n? for shortcuts\n" ;;
       question) printf "Choose an option\n› 1. Continue\nenter to submit answer | esc to interrupt\n" ;;
       approval) printf "Would you like to run the following command?\n› 1. Yes, proceed\nPress enter to confirm or esc to cancel\n" ;;
+      shell) printf "  1 background terminal running · /ps to view · /stop to close\n\n› Ask Codex to do anything\n? for shortcuts\n" ;;
+      shells) printf "  2 background terminals running · /ps to view · /stop to close\n\n› Ask Codex to do anything\n? for shortcuts\n" ;;
+      working-shell) printf "Working (7s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close\n\n› Ask Codex to do anything\n? for shortcuts\n" ;;
+      transcript) printf "  1 background terminal running · /ps to view · /stop to close\n2\n3\n4\n5\n6\n7\n8\n9\n10\n\n› Ask Codex to do anything\n? for shortcuts\n" ;;
       idle) printf "› Ask Codex to do anything\n? for shortcuts\n" ;;
     esac
     IFS= read -r state || exit 0
@@ -103,4 +107,28 @@ assert_badge done 'finished work clears an outdated blocked report'
 write_report waiting
 assert_badge done 'the stop report preserves the completed turn'
 
-printf 'PASS: agent badges follow questions, approvals and completed work\n'
+show_screen shell
+assert_badge shell 'background terminals remain visible after a stop report'
+[[ "$(tmux display-message -p -t "$pane" '#{@agent_status}')" == *'(shell)'* ]]
+show_screen shells
+assert_badge shell 'multiple background terminals show shell'
+write_report working
+show_screen working-shell
+assert_badge working 'an active turn outranks its background terminal'
+write_report blocked
+show_screen approval
+assert_badge blocked 'approval outranks background work'
+show_screen shell
+assert_badge shell 'background terminals clear an outdated blocked report'
+write_report waiting
+show_screen idle
+assert_badge idle 'closing background terminals clears the shell badge'
+show_screen transcript
+assert_badge idle 'old transcript text cannot leave a shell badge'
+rm -rf "$TMUX_AGENT_STATUS_DIR/${pane#%}/codex"
+show_screen shell
+assert_badge shell 'background terminals are detected without lifecycle reports'
+show_screen idle
+assert_badge idle 'closing terminals without reports clears the shell badge'
+
+printf 'PASS: agent badges follow questions, approvals, background terminals and completed work\n'

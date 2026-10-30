@@ -183,7 +183,7 @@ claude_session_status() {
   sed -n 's/.*"status":"\([a-z]*\)".*/\1/p' "$record"
 }
 
-# codex_screen_state <screen> -> working | blocked | waiting
+# codex_screen_state <screen> -> working | blocked | shell | waiting
 #
 # Codex keeps its composer and footer on the last lines of the pane. While a
 # turn runs, a status line "Working (7s • esc to interrupt)" sits just above the
@@ -191,7 +191,8 @@ claude_session_status() {
 # (1m 05s • esc to interrupt)"). Approvals replace the composer and end with
 # "Press enter to confirm or esc to cancel"; questions end with "enter to submit
 # answer | esc to interrupt" and show no timer. Match only those bottom lines so
-# transcript text can never fake a state.
+# transcript text can never fake a state. The background-terminal counter
+# stays above the composer after the turn ends and disappears on shell exit.
 codex_screen_state() {
   local foot
   foot="$(printf '%s\n' "$1" | awk 'NF' | tail -n 10)"
@@ -200,6 +201,8 @@ codex_screen_state() {
     echo blocked
   elif printf '%s\n' "$foot" | grep -qE '\(([0-9]+[hms][[:space:]]*)+•[[:space:]]*esc to interrupt\)'; then
     echo working
+  elif printf '%s\n' "$foot" | grep -qE '^[[:space:]]*[1-9][0-9]* background terminals? running · /ps to view · /stop to close[[:space:]]*$'; then
+    echo shell
   else
     echo waiting
   fi
@@ -231,14 +234,19 @@ classify_status() {
       fi
     fi
     if [ "$agent" = codex ] && {
-      [ "${reported%% *}" = working ] || [ "${reported%% *}" = blocked ];
+      [ "${reported%% *}" = working ] || [ "${reported%% *}" = blocked ] ||
+      [ "${reported%% *}" = waiting ];
     }; then
       # Questions may have no hook, and an approved command can keep its
-      # blocked report until it finishes. Reconcile both with the live screen.
+      # blocked report until it finishes. A Stop report also says waiting
+      # while background terminals run; only the footer tracks their exit.
+      # Reconcile these with the live screen.
       buf="$(tmux capture-pane -p -t "$pane_id" 2>/dev/null)" || buf=
       if [ -n "$buf" ]; then
         screen_state="$(codex_screen_state "$buf")"
-        if [ "$screen_state" = blocked ] || [ "${reported%% *}" = blocked ]; then
+        if [ "$screen_state" = blocked ] || [ "${reported%% *}" = blocked ] || {
+          [ "${reported%% *}" = waiting ] && [ "$screen_state" = shell ];
+        }; then
           echo "$screen_state ${reported#* }"
           return
         fi
