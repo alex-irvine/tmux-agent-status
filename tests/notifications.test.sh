@@ -172,7 +172,7 @@ tmux set-hook -R -t test:agent-a client-focus-in
 wait_for has_count 0
 
 # A slow delivery may hold the refresh lock longer than a normal refresh waits.
-# Focusing its window must still dismiss the notification once delivery ends,
+# Briefly focusing its window must dismiss the notification once delivery ends,
 # without putting any pane into the command-output screen that needs Enter.
 write_report "$pane_a" "$owner_a" working
 refresh
@@ -188,6 +188,8 @@ for attempt in 1 2; do
     exit 1
   fi
 done
+# The visit still counts if the user moves on before delivery finishes.
+tmux select-window -t test:away
 rm "$NOTIFY_DESKTOP/hold-delivery"
 wait "$slow_refresh"
 if tmux list-panes -a -F '#{pane_in_mode}' | grep -qx 1; then

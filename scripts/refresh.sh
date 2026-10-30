@@ -80,6 +80,12 @@ acquire_refresh_lock() {
     return 1
   }
 }
+# Remember focus before waiting for a scan or delivery. A brief visit counts
+# even if the client has switched elsewhere by the time the lock is available.
+if [ "${1:-}" = --dismiss-window ]; then
+  [[ "${2:-}" =~ ^@[0-9]+$ ]] || exit 0
+  tmux list-clients -F '#{window_id}' 2>/dev/null | grep -Fxq -- "$2" || exit 0
+fi
 acquire_refresh_lock "${1:-}" || exit 1
 trap cleanup_refresh_lock EXIT
 trap 'exit 1' INT TERM
@@ -175,7 +181,6 @@ play_sound_linux() { # play_sound_linux <theme-id|/path/to/file>
 dismiss_notifications() {
   local window_id="$1" dir record backend identity
   [[ "$window_id" =~ ^@[0-9]+$ ]] || return 0
-  tmux list-clients -F '#{window_id}' 2>/dev/null | grep -Fxq -- "$window_id" || return 0
   dir="$NOTIFICATIONS/${window_id#@}"
   for record in "$dir"/*; do
     [ -f "$record" ] || continue
