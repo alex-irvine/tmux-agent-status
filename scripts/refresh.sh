@@ -60,6 +60,12 @@ acquire_refresh_lock() {
           rm -f "$owner_file"
           rmdir "$LOCKDIR" 2>/dev/null
           continue
+        elif [ "${1:-}" = --dismiss-window ]; then
+          # Focus hooks must outlive a slow scan or notification delivery.
+          # Keep waiting for its live owner without flooding tmux with errors.
+          attempt=0
+          sleep 0.1
+          continue
         fi
         ;;
     esac
@@ -74,7 +80,7 @@ acquire_refresh_lock() {
     return 1
   }
 }
-acquire_refresh_lock || exit 1
+acquire_refresh_lock "${1:-}" || exit 1
 trap cleanup_refresh_lock EXIT
 trap 'exit 1' INT TERM
 

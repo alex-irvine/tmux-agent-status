@@ -5,11 +5,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d /tmp/tmux-agent-notifications.XXXXXX)"
 SOCKET="$TMP/tmux.sock"
 client=
+slow_refresh=
 cleanup() {
   if [ "$?" -ne 0 ]; then
     cat "$XDG_CACHE_HOME/tmux-agent-status/state" "$XDG_CACHE_HOME/tmux-agent-status/notify.log" 2>/dev/null || true
     find "$NOTIFY_DESKTOP/active" -type f -exec cat '{}' \;
   fi
+  rm -f "$NOTIFY_DESKTOP/hold-delivery"
+  [ -z "$slow_refresh" ] || wait "$slow_refresh" 2>/dev/null || true
   tmux -S "$SOCKET" kill-server 2>/dev/null || true
   exec 3>&-
   [ -z "$client" ] || wait "$client" 2>/dev/null || true
@@ -37,6 +40,10 @@ while [ "$#" -gt 2 ]; do
     *) exit 1 ;;
   esac
 done
+if [ -f "$NOTIFY_DESKTOP/hold-delivery" ]; then
+  : >"$NOTIFY_DESKTOP/delivery-started"
+  while [ -f "$NOTIFY_DESKTOP/hold-delivery" ]; do sleep 0.01; done
+fi
 if [ -z "$id" ] || [ ! -f "$NOTIFY_DESKTOP/active/$id" ]; then
   id="$(cat "$NOTIFY_DESKTOP/counter" 2>/dev/null || printf 100)"
   id=$((id + 1))
@@ -94,6 +101,7 @@ all_reports() {
   write_report "$pane_b" "$owner_b" "$1"
 }
 refresh() { bash "$ROOT/scripts/refresh.sh"; }
+refreshes_finished() { ! tmux show-messages -J | grep -Fq "$ROOT/scripts/refresh.sh"; }
 notification_count() { find "$NOTIFY_DESKTOP/active" -type f | wc -l; }
 has_count() { [ "$(notification_count)" -eq "$1" ]; }
 
@@ -106,8 +114,9 @@ wait_for attached
 
 all_reports waiting
 bash "$ROOT/agent-status.tmux"
+wait_for refreshes_finished
 bash "$ROOT/agent-status.tmux" # Reload must preserve existing hooks.
-wait_for test -f "$XDG_CACHE_HOME/tmux-agent-status/state"
+wait_for refreshes_finished
 all_reports working
 refresh
 all_reports waiting
@@ -160,6 +169,32 @@ refresh # Wait behind the dismissal's refresh lock.
 has_count 1
 rm "$NOTIFY_DESKTOP/fail-close"
 tmux set-hook -R -t test:agent-a client-focus-in
+wait_for has_count 0
+
+# A slow delivery may hold the refresh lock longer than a normal refresh waits.
+# Focusing its window must still dismiss the notification once delivery ends,
+# without putting any pane into the command-output screen that needs Enter.
+write_report "$pane_a" "$owner_a" working
+refresh
+touch "$NOTIFY_DESKTOP/hold-delivery"
+write_report "$pane_a" "$owner_a" waiting
+refresh &
+slow_refresh=$!
+wait_for test -f "$NOTIFY_DESKTOP/delivery-started"
+tmux set-hook -R -t test:agent-a client-focus-in
+for attempt in 1 2; do
+  if refresh; then
+    echo 'FAIL: competing refresh bypassed notification delivery' >&2
+    exit 1
+  fi
+done
+rm "$NOTIFY_DESKTOP/hold-delivery"
+wait "$slow_refresh"
+if tmux list-panes -a -F '#{pane_in_mode}' | grep -qx 1; then
+  echo 'FAIL: focusing a busy window opened a command-output screen' >&2
+  tmux capture-pane -p -M -t "$pane_a"
+  exit 1
+fi
 wait_for has_count 0
 
 printf 'PASS: notifications clear when their tmux window gains focus\n'
